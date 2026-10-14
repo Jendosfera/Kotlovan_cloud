@@ -27,6 +27,44 @@
       .animate-target-pulse {
         animation: pulse-ring 1.8s infinite ease-in-out;
       }
+
+      /* Transitions between blueprint cells */
+      @keyframes cell-enter-left {
+        0% { opacity: 0.15; transform: translate3d(-60px, 0, 0) scale(0.98); }
+        100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+      }
+      @keyframes cell-enter-right {
+        0% { opacity: 0.15; transform: translate3d(60px, 0, 0) scale(0.98); }
+        100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+      }
+      @keyframes cell-enter-up {
+        0% { opacity: 0.15; transform: translate3d(0, -60px, 0) scale(0.98); }
+        100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+      }
+      @keyframes cell-enter-down {
+        0% { opacity: 0.15; transform: translate3d(0, 60px, 0) scale(0.98); }
+        100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+      }
+      @keyframes cell-enter-fade {
+        0% { opacity: 0.2; transform: scale(0.96); }
+        100% { opacity: 1; transform: scale(1); }
+      }
+
+      .animate-cell-left {
+        animation: cell-enter-left 320ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+      .animate-cell-right {
+        animation: cell-enter-right 320ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+      .animate-cell-up {
+        animation: cell-enter-up 320ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+      .animate-cell-down {
+        animation: cell-enter-down 320ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+      .animate-cell-fade {
+        animation: cell-enter-fade 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
     </style>
   </head>
   <body class="bg-slate-950 text-slate-100 antialiased select-none overflow-hidden font-sans">

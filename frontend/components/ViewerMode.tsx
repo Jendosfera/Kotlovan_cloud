@@ -39,10 +39,13 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
     array.lastViewedCell || { row: 0, col: 0 }
   );
 
-  // Viewport transforms (offset in screen pixels, scale multiplier)
+  // Viewport transforms (offset in screen pixels relative to commonPoint, scale multiplier)
   const [scale, setScale] = useState<number>(array.globalScale || 1.0);
   const [offsetX, setOffsetX] = useState<number>(array.globalOffsetX || 0);
   const [offsetY, setOffsetY] = useState<number>(array.globalOffsetY || 0);
+
+  // Animation direction for smooth cell transition
+  const [transitionAnimClass, setTransitionAnimClass] = useState<string>('animate-cell-fade');
 
   // Sub-modes
   const [isSettingCommonPoint, setIsSettingCommonPoint] = useState<boolean>(false);
@@ -72,12 +75,13 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
 
   // Container refs for measuring and touch gestures
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const touchStartRef = useRef<{
+  const touchStateRef = useRef<{
     time: number;
-    touches: { x: number; y: number }[];
-    initialDist: number;
-    initialScale: number;
-    initialOffset: { x: number; y: number };
+    startTouches: { x: number; y: number }[];
+    prevMid: { x: number; y: number };
+    prevDist: number;
+    currentScale: number;
+    currentOffset: { x: number; y: number };
     isTwoFinger: boolean;
     hasMoved: boolean;
   } | null>(null);
@@ -91,6 +95,45 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
   // Current cell data
   const currentKey = `${currentCoord.row}_${currentCoord.col}`;
   const currentCell: CellData | undefined = array.cells[currentKey];
+
+  // Helper to obtain anchor ("Общая точка")
+  const getAnchor = useCallback((): { x: number; y: number } => {
+    if (currentCell?.commonPoint) {
+      return currentCell.commonPoint;
+    }
+    return {
+      x: (currentCell?.imageWidth || 1200) / 2,
+      y: (currentCell?.imageHeight || 800) / 2,
+    };
+  }, [currentCell]);
+
+  /**
+   * Clamp offset so the edges of the drawing NEVER go beyond the center of the viewport.
+   * Left edge: (0 - anchor.x) * scale + offsetX <= 0  ==> offsetX <= anchor.x * scale
+   * Right edge: (w - anchor.x) * scale + offsetX >= 0 ==> offsetX >= -(w - anchor.x) * scale
+   * Top edge: (0 - anchor.y) * scale + offsetY <= 0   ==> offsetY <= anchor.y * scale
+   * Bottom edge: (h - anchor.y) * scale + offsetY >= 0==> offsetY >= -(h - anchor.y) * scale
+   */
+  const clampOffsets = useCallback(
+    (ox: number, oy: number, currentS: number): { x: number; y: number } => {
+      if (!currentCell) return { x: ox, y: oy };
+      const anchor = getAnchor();
+      const w = currentCell.imageWidth || 1200;
+      const h = currentCell.imageHeight || 800;
+
+      const minX = -(w - anchor.x) * currentS;
+      const maxX = anchor.x * currentS;
+
+      const minY = -(h - anchor.y) * currentS;
+      const maxY = anchor.y * currentS;
+
+      const clampedX = Math.max(minX, Math.min(maxX, ox));
+      const clampedY = Math.max(minY, Math.min(maxY, oy));
+
+      return { x: clampedX, y: clampedY };
+    },
+    [currentCell, getAnchor]
+  );
 
   // Ensure default "Общая точка" is set to center of image if never set
   useEffect(() => {
@@ -114,23 +157,26 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
   // Load cell specific viewport if it has customPosition === true
   useEffect(() => {
     if (currentCell?.customPosition && currentCell.viewport) {
-      setScale(currentCell.viewport.scale);
-      setOffsetX(currentCell.viewport.offsetX);
-      setOffsetY(currentCell.viewport.offsetY);
+      const s = currentCell.viewport.scale;
+      const clamped = clampOffsets(currentCell.viewport.offsetX, currentCell.viewport.offsetY, s);
+      setScale(s);
+      setOffsetX(clamped.x);
+      setOffsetY(clamped.y);
     }
-  }, [currentCoord.row, currentCoord.col]);
+  }, [currentCoord.row, currentCoord.col, currentCell, clampOffsets]);
 
   // Persist global scale/offset and cell viewport
   const persistViewport = useCallback(
     (newScale: number, newX: number, newY: number) => {
       if (!currentCell) return;
+      const clamped = clampOffsets(newX, newY, newScale);
 
       if (currentCell.customPosition) {
         const updatedCells = {
           ...array.cells,
           [currentKey]: {
             ...currentCell,
-            viewport: { scale: newScale, offsetX: newX, offsetY: newY },
+            viewport: { scale: newScale, offsetX: clamped.x, offsetY: clamped.y },
           },
         };
         onUpdateArray({
@@ -143,20 +189,33 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
           ...array,
           lastViewedCell: currentCoord,
           globalScale: newScale,
-          globalOffsetX: newX,
-          globalOffsetY: newY,
+          globalOffsetX: clamped.x,
+          globalOffsetY: clamped.y,
         });
       }
     },
-    [array, currentCell, currentKey, currentCoord, onUpdateArray]
+    [array, currentCell, currentKey, currentCoord, onUpdateArray, clampOffsets]
   );
 
-  // Navigation between array cells
+  // Navigation between array cells with smooth slide/fade animation
   const goToCell = useCallback(
     (r: number, c: number) => {
       if (r < 0 || r >= array.rows || c < 0 || c >= array.cols) return;
       const key = `${r}_${c}`;
       if (!array.cells[key]) return; // empty cell, skip
+
+      // Determine animation direction
+      if (c > currentCoord.col) {
+        setTransitionAnimClass('animate-cell-right');
+      } else if (c < currentCoord.col) {
+        setTransitionAnimClass('animate-cell-left');
+      } else if (r > currentCoord.row) {
+        setTransitionAnimClass('animate-cell-down');
+      } else if (r < currentCoord.row) {
+        setTransitionAnimClass('animate-cell-up');
+      } else {
+        setTransitionAnimClass('animate-cell-fade');
+      }
 
       setCurrentCoord({ row: r, col: c });
       onUpdateArray({
@@ -164,19 +223,8 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
         lastViewedCell: { row: r, col: c },
       });
     },
-    [array, onUpdateArray]
+    [array, currentCoord, onUpdateArray]
   );
-
-  // Helpers to get image center coordinates relative to "Общая точка"
-  const getAnchor = (): { x: number; y: number } => {
-    if (currentCell?.commonPoint) {
-      return currentCell.commonPoint;
-    }
-    return {
-      x: (currentCell?.imageWidth || 1200) / 2,
-      y: (currentCell?.imageHeight || 800) / 2,
-    };
-  };
 
   /* ----------------- GESTURE CONTROLLER ----------------- */
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
@@ -184,76 +232,102 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
     const isTwo = touches.length >= 2;
 
     let initialDist = 0;
+    let mid = { x: touches[0].x, y: touches[0].y };
+
     if (isTwo) {
       const dx = touches[0].x - touches[1].x;
       const dy = touches[0].y - touches[1].y;
       initialDist = Math.hypot(dx, dy);
+      mid = {
+        x: (touches[0].x + touches[1].x) / 2,
+        y: (touches[0].y + touches[1].y) / 2,
+      };
     }
 
-    touchStartRef.current = {
+    touchStateRef.current = {
       time: Date.now(),
-      touches,
-      initialDist,
-      initialScale: scale,
-      initialOffset: { x: offsetX, y: offsetY },
+      startTouches: touches,
+      prevMid: mid,
+      prevDist: initialDist,
+      currentScale: scale,
+      currentOffset: { x: offsetX, y: offsetY },
       isTwoFinger: isTwo,
       hasMoved: false,
     };
   };
 
   const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    const start = touchStartRef.current;
-    if (!start) return;
+    const state = touchStateRef.current;
+    if (!state) return;
 
     const currentTouches = Array.from(e.touches).map((t) => ({ x: t.clientX, y: t.clientY }));
 
     // Two-finger pinch zoom & two-finger drag
-    if (e.touches.length >= 2 && start.isTwoFinger) {
-      const dx = currentTouches[0].x - currentTouches[1].x;
-      const dy = currentTouches[0].y - currentTouches[1].y;
-      const dist = Math.hypot(dx, dy);
+    if (e.touches.length >= 2) {
+      state.isTwoFinger = true;
+      state.hasMoved = true;
 
-      if (start.initialDist > 0) {
-        // Pinch Zoom relative to midpoint
-        const pinchFactor = dist / start.initialDist;
-        const targetScale = Math.max(0.15, Math.min(12, start.initialScale * pinchFactor));
+      const t0 = currentTouches[0];
+      const t1 = currentTouches[1];
+      const dist = Math.hypot(t0.x - t1.x, t0.y - t1.y);
+      const currMid = {
+        x: (t0.x + t1.x) / 2,
+        y: (t0.y + t1.y) / 2,
+      };
 
-        // Midpoint of current fingers
-        const midX = (currentTouches[0].x + currentTouches[1].x) / 2;
-        const midY = (currentTouches[0].y + currentTouches[1].y) / 2;
-        const initialMidX = (start.touches[0].x + start.touches[1].x) / 2;
-        const initialMidY = (start.touches[0].y + start.touches[1].y) / 2;
+      if (state.prevDist > 0 && dist > 0) {
+        // Pinch zoom factor
+        const pinchRatio = dist / state.prevDist;
+        const newScale = Math.max(0.15, Math.min(12, state.currentScale * pinchRatio));
 
-        // Two-finger pan offset
-        const panDx = midX - initialMidX;
-        const panDy = midY - initialMidY;
+        const rect = containerRef.current?.getBoundingClientRect();
+        const scX = (rect?.width || window.innerWidth) / 2;
+        const scY = (rect?.height || window.innerHeight) / 2;
 
-        setScale(targetScale);
-        setOffsetX(start.initialOffset.x + panDx);
-        setOffsetY(start.initialOffset.y + panDy);
-        start.hasMoved = true;
+        /**
+         * Zoom pivot calculation:
+         * We want the point on image under `prevMid` to move to `currMid` at `newScale`.
+         * imgPoint_X = anchor.x + (prevMid.x - scX - state.currentOffset.x) / state.currentScale
+         * currMid.x = scX + newOffsetX + (imgPoint_X - anchor.x) * newScale
+         * => newOffsetX = currMid.x - scX - (prevMid.x - scX - state.currentOffset.x) * (newScale / state.currentScale)
+         */
+        const scaleFactor = newScale / state.currentScale;
+        const rawOffsetX = currMid.x - scX - (state.prevMid.x - scX - state.currentOffset.x) * scaleFactor;
+        const rawOffsetY = currMid.y - scY - (state.prevMid.y - scY - state.currentOffset.y) * scaleFactor;
+
+        // Clamp so edges never pass beyond viewport center
+        const clamped = clampOffsets(rawOffsetX, rawOffsetY, newScale);
+
+        setScale(newScale);
+        setOffsetX(clamped.x);
+        setOffsetY(clamped.y);
+
+        // Update step reference
+        state.currentScale = newScale;
+        state.currentOffset = clamped;
+        state.prevMid = currMid;
+        state.prevDist = dist;
       }
-    } else if (e.touches.length === 1 && !start.isTwoFinger) {
+    } else if (e.touches.length === 1 && !state.isTwoFinger) {
       // Single finger drag tracking for swipe detection
-      start.hasMoved = true;
+      state.hasMoved = true;
     }
   };
 
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
-    const start = touchStartRef.current;
-    touchStartRef.current = null;
-    if (!start) return;
+    const state = touchStateRef.current;
+    touchStateRef.current = null;
+    if (!state) return;
 
-    // Single-finger swipe detection
-    if (!start.isTwoFinger && e.changedTouches.length === 1) {
+    // Single-finger swipe detection (swipes trigger regardless of zoom level)
+    if (!state.isTwoFinger && e.changedTouches.length === 1) {
       const endTouch = e.changedTouches[0];
-      const startTouch = start.touches[0];
+      const startTouch = state.startTouches[0];
       const dx = endTouch.clientX - startTouch.x;
       const dy = endTouch.clientY - startTouch.y;
       const dist = Math.hypot(dx, dy);
-      const timeDiff = Date.now() - start.time;
+      const timeDiff = Date.now() - state.time;
 
-      // Swipes trigger regardless of zoom level
       if (dist > 45 && timeDiff < 600) {
         if (Math.abs(dx) > Math.abs(dy)) {
           // Horizontal swipe: next/prev column
@@ -275,18 +349,34 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
     }
 
     // Persist scale/offsets if two-finger moved
-    if (start.hasMoved && start.isTwoFinger) {
-      persistViewport(scale, offsetX, offsetY);
+    if (state.hasMoved && state.isTwoFinger) {
+      persistViewport(state.currentScale, state.currentOffset.x, state.currentOffset.y);
     }
   };
 
-  // Mouse wheel zoom for desktop development/testing
+  // Mouse wheel zoom for desktop development/testing pivoted at cursor
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.15 : 0.85;
     const newScale = Math.max(0.15, Math.min(12, scale * factor));
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    const scX = (rect?.width || window.innerWidth) / 2;
+    const scY = (rect?.height || window.innerHeight) / 2;
+
+    const mouseX = e.clientX;
+    const mouseY = e.clientY;
+
+    const scaleFactor = newScale / scale;
+    const rawOffsetX = mouseX - scX - (mouseX - scX - offsetX) * scaleFactor;
+    const rawOffsetY = mouseY - scY - (mouseY - scY - offsetY) * scaleFactor;
+
+    const clamped = clampOffsets(rawOffsetX, rawOffsetY, newScale);
+
     setScale(newScale);
-    persistViewport(newScale, offsetX, offsetY);
+    setOffsetX(clamped.x);
+    setOffsetY(clamped.y);
+    persistViewport(newScale, clamped.x, clamped.y);
   };
 
   /* ----------------- EYE ICON DOUBLE TAP CYCLING ----------------- */
@@ -506,131 +596,137 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
         <div className="absolute inset-0 bg-white z-[999] opacity-95 pointer-events-none transition-opacity" />
       )}
 
-      {/* Drawing Viewport Layer */}
+      {/* Animated Cell Transition Container */}
       <div
-        className="absolute inset-0 pointer-events-none flex items-center justify-center will-change-transform"
-        style={{
-          transform: `translate3d(${offsetX}px, ${offsetY}px, 0)`,
-        }}
+        key={currentKey}
+        className={`absolute inset-0 will-change-transform ${transitionAnimClass}`}
       >
-        {currentCell?.imageDataUrl ? (
-          <div
-            className="relative"
-            style={{
-              width: `${currentCell.imageWidth}px`,
-              height: `${currentCell.imageHeight}px`,
-              transform: `scale(${scale}) translate3d(${-anchor.x + (currentCell.imageWidth / 2)}px, ${-anchor.y + (currentCell.imageHeight / 2)}px, 0)`,
-              transformOrigin: `${anchor.x}px ${anchor.y}px`,
-            }}
-          >
-            {/* Base blueprint image */}
-            <img
-              src={currentCell.imageDataUrl}
-              alt={currentCell.title}
-              className="w-full h-full object-contain pointer-events-none"
-              draggable={false}
-            />
-
-            {/* Independent Comment Layer on top of the drawing */}
-            <svg
-              className="absolute inset-0 w-full h-full pointer-events-auto"
-              style={{ overflow: 'visible' }}
+        {/* Drawing Viewport Layer */}
+        <div
+          className="absolute inset-0 pointer-events-none flex items-center justify-center will-change-transform"
+          style={{
+            transform: `translate3d(${offsetX}px, ${offsetY}px, 0)`,
+          }}
+        >
+          {currentCell?.imageDataUrl ? (
+            <div
+              className="relative"
+              style={{
+                width: `${currentCell.imageWidth}px`,
+                height: `${currentCell.imageHeight}px`,
+                transform: `scale(${scale}) translate3d(${-anchor.x + (currentCell.imageWidth / 2)}px, ${-anchor.y + (currentCell.imageHeight / 2)}px, 0)`,
+                transformOrigin: `${anchor.x}px ${anchor.y}px`,
+              }}
             >
-              {currentCell.comments.map((comm) => {
-                // Circle visual sizing per eye mode
-                const r =
-                  eyeMode === EyeDisplayMode.UNIFORM_SIZE
-                    ? 32 / scale
-                    : comm.radius;
+              {/* Base blueprint image */}
+              <img
+                src={currentCell.imageDataUrl}
+                alt={currentCell.title}
+                className="w-full h-full object-contain pointer-events-none"
+                draggable={false}
+              />
 
-                // Blinking opacity in mode 2
-                const circleClass =
-                  eyeMode === EyeDisplayMode.BLINKING
-                    ? 'animate-pulse fill-amber-500/40 stroke-amber-300 stroke-2'
-                    : 'fill-amber-500/25 stroke-amber-400 stroke-2';
+              {/* Independent Comment Layer on top of the drawing */}
+              <svg
+                className="absolute inset-0 w-full h-full pointer-events-auto"
+                style={{ overflow: 'visible' }}
+              >
+                {currentCell.comments.map((comm) => {
+                  // Circle visual sizing per eye mode
+                  const r =
+                    eyeMode === EyeDisplayMode.UNIFORM_SIZE
+                      ? 32 / scale
+                      : comm.radius;
 
-                // Scaled label text size
-                const fontSize = Math.max(12 / scale, r * 0.45);
+                  // Blinking opacity in mode 2
+                  const circleClass =
+                    eyeMode === EyeDisplayMode.BLINKING
+                      ? 'animate-pulse fill-amber-500/40 stroke-amber-300 stroke-2'
+                      : 'fill-amber-500/25 stroke-amber-400 stroke-2';
 
-                return (
-                  <g
-                    key={comm.id}
-                    className="cursor-pointer pointer-events-auto"
-                    onTouchStart={() => handleCommentCircleTouchStart(comm)}
-                    onTouchEnd={() => handleCommentCircleTouchEnd(comm)}
-                    onDoubleClick={() => setReadingComment(comm)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setEditingComment({ comment: comm, isNew: false });
-                    }}
-                  >
-                    {/* Circle Anchor */}
+                  // Scaled label text size
+                  const fontSize = Math.max(12 / scale, r * 0.45);
+
+                  return (
+                    <g
+                      key={comm.id}
+                      className="cursor-pointer pointer-events-auto"
+                      onTouchStart={() => handleCommentCircleTouchStart(comm)}
+                      onTouchEnd={() => handleCommentCircleTouchEnd(comm)}
+                      onDoubleClick={() => setReadingComment(comm)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setEditingComment({ comment: comm, isNew: false });
+                      }}
+                    >
+                      {/* Circle Anchor */}
+                      <circle
+                        cx={comm.x}
+                        cy={comm.y}
+                        r={r}
+                        className={circleClass}
+                      />
+                      <circle
+                        cx={comm.x}
+                        cy={comm.y}
+                        r={Math.max(2, 4 / scale)}
+                        fill="#f59e0b"
+                      />
+
+                      {/* Short Title Label above circle */}
+                      {comm.title && (
+                        <text
+                          x={comm.x}
+                          y={comm.y - r - 6 / scale}
+                          textAnchor="middle"
+                          fill="#fde68a"
+                          fontSize={fontSize}
+                          fontWeight="bold"
+                          className="drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]"
+                        >
+                          {comm.title}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+
+                {/* Visual mark for "Общая точка" (subtle guide) */}
+                {currentCell.commonPoint && (
+                  <g opacity={0.65}>
                     <circle
-                      cx={comm.x}
-                      cy={comm.y}
-                      r={r}
-                      className={circleClass}
+                      cx={currentCell.commonPoint.x}
+                      cy={currentCell.commonPoint.y}
+                      r={8 / scale}
+                      fill="none"
+                      stroke="#06b6d4"
+                      strokeWidth={2 / scale}
+                      strokeDasharray={`${3 / scale},${3 / scale}`}
                     />
-                    <circle
-                      cx={comm.x}
-                      cy={comm.y}
-                      r={Math.max(2, 4 / scale)}
-                      fill="#f59e0b"
+                    <line
+                      x1={currentCell.commonPoint.x - 14 / scale}
+                      y1={currentCell.commonPoint.y}
+                      x2={currentCell.commonPoint.x + 14 / scale}
+                      y2={currentCell.commonPoint.y}
+                      stroke="#06b6d4"
+                      strokeWidth={1.5 / scale}
                     />
-
-                    {/* Short Title Label above circle */}
-                    {comm.title && (
-                      <text
-                        x={comm.x}
-                        y={comm.y - r - 6 / scale}
-                        textAnchor="middle"
-                        fill="#fde68a"
-                        fontSize={fontSize}
-                        fontWeight="bold"
-                        className="drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]"
-                      >
-                        {comm.title}
-                      </text>
-                    )}
+                    <line
+                      x1={currentCell.commonPoint.x}
+                      y1={currentCell.commonPoint.y - 14 / scale}
+                      x2={currentCell.commonPoint.x}
+                      y2={currentCell.commonPoint.y + 14 / scale}
+                      stroke="#06b6d4"
+                      strokeWidth={1.5 / scale}
+                    />
                   </g>
-                );
-              })}
-
-              {/* Visual mark for "Общая точка" (subtle guide) */}
-              {currentCell.commonPoint && (
-                <g opacity={0.65}>
-                  <circle
-                    cx={currentCell.commonPoint.x}
-                    cy={currentCell.commonPoint.y}
-                    r={8 / scale}
-                    fill="none"
-                    stroke="#06b6d4"
-                    strokeWidth={2 / scale}
-                    strokeDasharray={`${3 / scale},${3 / scale}`}
-                  />
-                  <line
-                    x1={currentCell.commonPoint.x - 14 / scale}
-                    y1={currentCell.commonPoint.y}
-                    x2={currentCell.commonPoint.x + 14 / scale}
-                    y2={currentCell.commonPoint.y}
-                    stroke="#06b6d4"
-                    strokeWidth={1.5 / scale}
-                  />
-                  <line
-                    x1={currentCell.commonPoint.x}
-                    y1={currentCell.commonPoint.y - 14 / scale}
-                    x2={currentCell.commonPoint.x}
-                    y2={currentCell.commonPoint.y + 14 / scale}
-                    stroke="#06b6d4"
-                    strokeWidth={1.5 / scale}
-                  />
-                </g>
-              )}
-            </svg>
-          </div>
-        ) : (
-          <div className="text-slate-500 text-sm">Чертеж не загружен в ячейку</div>
-        )}
+                )}
+              </svg>
+            </div>
+          ) : (
+            <div className="text-slate-500 text-sm">Чертеж не загружен в ячейку</div>
+          )}
+        </div>
       </div>
 
       {/* Pulsating Target Circle in Center during Setting Modes */}

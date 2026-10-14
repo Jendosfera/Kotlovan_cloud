@@ -1,9 +1,8 @@
 import React, { useRef, useState } from 'react';
-import { Layers, FolderOpen, PlusSquare, FileCode2, Sparkles, AlertCircle } from 'lucide-react';
+import { Layers, FolderOpen, PlusSquare, HardHat, FileCode2, Sparkles, AlertCircle } from 'lucide-react';
 import { BlueprintArray } from '../types';
 import { parseArrayConfigFile } from '../services/storageService';
 import { createSampleDemoArray } from '../constants';
-import { CatInHardHat } from './CatInHardHat';
 
 interface MainMenuProps {
   onStartCreate: () => void;
@@ -55,13 +54,10 @@ export const MainMenu: React.FC<MainMenuProps> = ({
         onChange={handleFileChange}
       />
 
-      {/* Header and Brand with Black Cat in Hard Hat Mascot */}
+      {/* Header and Brand */}
       <div className="pt-8 text-center">
-        <div className="inline-flex items-center justify-center w-24 h-24 rounded-3xl bg-amber-500/10 border-2 border-amber-500/40 mb-4 shadow-[0_0_35px_rgba(245,158,11,0.25)] relative group cursor-pointer transition-transform hover:scale-105 active:scale-95">
-          <CatInHardHat size={68} className="drop-shadow-[0_4px_10px_rgba(0,0,0,0.8)]" />
-          <span className="absolute -bottom-2 px-2 py-0.5 rounded-full bg-slate-900 border border-amber-500/60 text-[9px] font-extrabold text-amber-400 tracking-wider uppercase shadow-md">
-            Кот-Инженер
-          </span>
+        <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 text-amber-400 mb-4 shadow-[0_0_25px_rgba(245,158,11,0.2)]">
+          <HardHat size={44} className="stroke-[1.75]" />
         </div>
         <h1 className="text-4xl font-extrabold tracking-wider text-slate-50 uppercase drop-shadow">
           Котлован
