@@ -30,16 +30,19 @@ jobs:
           npm install
           npm run build
 
-      # 2. Установка Capacitor и генерация Android-проекта
-      - name: Install Capacitor
+      - name: Setup Capacitor and generate Android project
         run: |
-          npm init -y
-          npm install @capacitor/core @capacitor/cli @capacitor/android
-          mkdir -p android-empty
-          npx cap init "Приложение" "com.example.app" --web-dir frontend/dist
-          npx cap add android
-          npx cap sync android
+          # Убираем испорченный ts-конфиг, если остался от прошлых запусков
+          rm -f capacitor.config.ts
 
+          # Создаём JSON-конфиг (читается без TypeScript)
+          cat > capacitor.config.json << 'EOF'
+          {
+            "appId": "ru.kotlovan.app",
+            "appName": "Kotlovan",
+            "webDir": "frontend/dist"
+          }
+          EOF
       # 3. Сборка APK через Gradle
       - name: Build APK
         run: |
