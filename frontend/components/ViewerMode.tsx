@@ -11,6 +11,7 @@ import {
   Info,
   MapPin,
   X,
+  Move,
 } from 'lucide-react';
 import {
   BlueprintArray,
@@ -44,12 +45,19 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
   const [offsetX, setOffsetX] = useState<number>(array.globalOffsetX || 0);
   const [offsetY, setOffsetY] = useState<number>(array.globalOffsetY || 0);
 
+  // Container viewport dimensions for 1:1 screen mapping
+  const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({
+    width: typeof window !== 'undefined' ? window.innerWidth : 400,
+    height: typeof window !== 'undefined' ? window.innerHeight : 700,
+  });
+
   // Animation direction for smooth cell transition
   const [transitionAnimClass, setTransitionAnimClass] = useState<string>('animate-cell-fade');
 
   // Sub-modes
   const [isSettingCommonPoint, setIsSettingCommonPoint] = useState<boolean>(false);
   const [isSettingComment, setIsSettingComment] = useState<boolean>(false);
+  const [repositioningCommentId, setRepositioningCommentId] = useState<string | null>(null);
   const [showContextMenu, setShowContextMenu] = useState<boolean>(false);
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
 
@@ -78,10 +86,11 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
   const touchStateRef = useRef<{
     time: number;
     startTouches: { x: number; y: number }[];
-    prevMid: { x: number; y: number };
-    prevDist: number;
-    currentScale: number;
-    currentOffset: { x: number; y: number };
+    initialMid: { x: number; y: number };
+    initialDist: number;
+    initialScale: number;
+    initialOffset: { x: number; y: number };
+    imgPointAtMid: { x: number; y: number };
     isTwoFinger: boolean;
     hasMoved: boolean;
   } | null>(null);
@@ -96,6 +105,22 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
   const currentKey = `${currentCoord.row}_${currentCoord.col}`;
   const currentCell: CellData | undefined = array.cells[currentKey];
 
+  // Measure container viewport size
+  useEffect(() => {
+    const updateSize = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setContainerSize({ width: rect.width, height: rect.height });
+      }
+    };
+    updateSize();
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, []);
+
+  const screenCenterX = containerSize.width / 2;
+  const screenCenterY = containerSize.height / 2;
+
   // Helper to obtain anchor ("Общая точка")
   const getAnchor = useCallback((): { x: number; y: number } => {
     if (currentCell?.commonPoint) {
@@ -108,11 +133,15 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
   }, [currentCell]);
 
   /**
-   * Clamp offset so the edges of the drawing NEVER go beyond the center of the viewport.
-   * Left edge: (0 - anchor.x) * scale + offsetX <= 0  ==> offsetX <= anchor.x * scale
-   * Right edge: (w - anchor.x) * scale + offsetX >= 0 ==> offsetX >= -(w - anchor.x) * scale
-   * Top edge: (0 - anchor.y) * scale + offsetY <= 0   ==> offsetY <= anchor.y * scale
-   * Bottom edge: (h - anchor.y) * scale + offsetY >= 0==> offsetY >= -(h - anchor.y) * scale
+   * Clamp offset so the edges of the drawing NEVER go beyond the center of the viewport:
+   * Left edge (x = 0): screenCenterX + offsetX + (0 - anchor.x) * scale <= screenCenterX
+   *  => offsetX <= anchor.x * scale
+   * Right edge (x = W): screenCenterX + offsetX + (W - anchor.x) * scale >= screenCenterX
+   *  => offsetX >= -(W - anchor.x) * scale
+   * Top edge (y = 0): screenCenterY + offsetY + (0 - anchor.y) * scale <= screenCenterY
+   *  => offsetY <= anchor.y * scale
+   * Bottom edge (y = H): screenCenterY + offsetY + (H - anchor.y) * scale >= screenCenterY
+   *  => offsetY >= -(H - anchor.y) * scale
    */
   const clampOffsets = useCallback(
     (ox: number, oy: number, currentS: number): { x: number; y: number } => {
@@ -244,13 +273,21 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
       };
     }
 
+    const anchor = getAnchor();
+    // Image point directly under the midpoint of touches at gesture start
+    const imgPointAtMid = {
+      x: anchor.x + (mid.x - screenCenterX - offsetX) / scale,
+      y: anchor.y + (mid.y - screenCenterY - offsetY) / scale,
+    };
+
     touchStateRef.current = {
       time: Date.now(),
       startTouches: touches,
-      prevMid: mid,
-      prevDist: initialDist,
-      currentScale: scale,
-      currentOffset: { x: offsetX, y: offsetY },
+      initialMid: mid,
+      initialDist,
+      initialScale: scale,
+      initialOffset: { x: offsetX, y: offsetY },
+      imgPointAtMid,
       isTwoFinger: isTwo,
       hasMoved: false,
     };
@@ -263,8 +300,7 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
     const currentTouches = Array.from(e.touches).map((t) => ({ x: t.clientX, y: t.clientY }));
 
     // Two-finger pinch zoom & two-finger drag
-    if (e.touches.length >= 2) {
-      state.isTwoFinger = true;
+    if (e.touches.length >= 2 && state.isTwoFinger && state.initialDist > 0) {
       state.hasMoved = true;
 
       const t0 = currentTouches[0];
@@ -275,39 +311,21 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
         y: (t0.y + t1.y) / 2,
       };
 
-      if (state.prevDist > 0 && dist > 0) {
-        // Pinch zoom factor
-        const pinchRatio = dist / state.prevDist;
-        const newScale = Math.max(0.15, Math.min(12, state.currentScale * pinchRatio));
+      // 1. Scale is current distance divided by initial distance * initialScale
+      const scaleRatio = dist / state.initialDist;
+      const newScale = Math.max(0.15, Math.min(12, state.initialScale * scaleRatio));
 
-        const rect = containerRef.current?.getBoundingClientRect();
-        const scX = (rect?.width || window.innerWidth) / 2;
-        const scY = (rect?.height || window.innerHeight) / 2;
+      // 2. The point on the image under initialMid must stay under currMid
+      const anchor = getAnchor();
+      const rawOffsetX = currMid.x - screenCenterX - (state.imgPointAtMid.x - anchor.x) * newScale;
+      const rawOffsetY = currMid.y - screenCenterY - (state.imgPointAtMid.y - anchor.y) * newScale;
 
-        /**
-         * Zoom pivot calculation:
-         * We want the point on image under `prevMid` to move to `currMid` at `newScale`.
-         * imgPoint_X = anchor.x + (prevMid.x - scX - state.currentOffset.x) / state.currentScale
-         * currMid.x = scX + newOffsetX + (imgPoint_X - anchor.x) * newScale
-         * => newOffsetX = currMid.x - scX - (prevMid.x - scX - state.currentOffset.x) * (newScale / state.currentScale)
-         */
-        const scaleFactor = newScale / state.currentScale;
-        const rawOffsetX = currMid.x - scX - (state.prevMid.x - scX - state.currentOffset.x) * scaleFactor;
-        const rawOffsetY = currMid.y - scY - (state.prevMid.y - scY - state.currentOffset.y) * scaleFactor;
+      // Clamp so edges never pass beyond viewport center
+      const clamped = clampOffsets(rawOffsetX, rawOffsetY, newScale);
 
-        // Clamp so edges never pass beyond viewport center
-        const clamped = clampOffsets(rawOffsetX, rawOffsetY, newScale);
-
-        setScale(newScale);
-        setOffsetX(clamped.x);
-        setOffsetY(clamped.y);
-
-        // Update step reference
-        state.currentScale = newScale;
-        state.currentOffset = clamped;
-        state.prevMid = currMid;
-        state.prevDist = dist;
-      }
+      setScale(newScale);
+      setOffsetX(clamped.x);
+      setOffsetY(clamped.y);
     } else if (e.touches.length === 1 && !state.isTwoFinger) {
       // Single finger drag tracking for swipe detection
       state.hasMoved = true;
@@ -350,7 +368,7 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
 
     // Persist scale/offsets if two-finger moved
     if (state.hasMoved && state.isTwoFinger) {
-      persistViewport(state.currentScale, state.currentOffset.x, state.currentOffset.y);
+      persistViewport(scale, offsetX, offsetY);
     }
   };
 
@@ -360,16 +378,16 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
     const factor = e.deltaY < 0 ? 1.15 : 0.85;
     const newScale = Math.max(0.15, Math.min(12, scale * factor));
 
-    const rect = containerRef.current?.getBoundingClientRect();
-    const scX = (rect?.width || window.innerWidth) / 2;
-    const scY = (rect?.height || window.innerHeight) / 2;
-
     const mouseX = e.clientX;
     const mouseY = e.clientY;
+    const anchor = getAnchor();
 
-    const scaleFactor = newScale / scale;
-    const rawOffsetX = mouseX - scX - (mouseX - scX - offsetX) * scaleFactor;
-    const rawOffsetY = mouseY - scY - (mouseY - scY - offsetY) * scaleFactor;
+    // Image point under mouse
+    const imgX = anchor.x + (mouseX - screenCenterX - offsetX) / scale;
+    const imgY = anchor.y + (mouseY - screenCenterY - offsetY) / scale;
+
+    const rawOffsetX = mouseX - screenCenterX - (imgX - anchor.x) * newScale;
+    const rawOffsetY = mouseY - screenCenterY - (imgY - anchor.y) * newScale;
 
     const clamped = clampOffsets(rawOffsetX, rawOffsetY, newScale);
 
@@ -417,14 +435,11 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
   /* ----------------- "ОБЩАЯ ТОЧКА" CONFIRMATION ----------------- */
   const handleConfirmCommonPoint = () => {
     if (!currentCell) return;
-    const rect = containerRef.current?.getBoundingClientRect();
-    const screenCenterX = (rect?.width || window.innerWidth) / 2;
-    const screenCenterY = (rect?.height || window.innerHeight) / 2;
-
-    // Calculate image coordinate currently sitting at the center of viewport
     const anchor = getAnchor();
-    const imgX = anchor.x + (screenCenterX - (screenCenterX + offsetX)) / scale;
-    const imgY = anchor.y + (screenCenterY - (screenCenterY + offsetY)) / scale;
+
+    // Exact image coordinate under screen center crosshair
+    const imgX = anchor.x - offsetX / scale;
+    const imgY = anchor.y - offsetY / scale;
 
     const newPoint = {
       x: Math.round(Math.max(0, Math.min(currentCell.imageWidth, imgX))),
@@ -450,32 +465,97 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
     setIsSettingCommonPoint(false);
   };
 
-  /* ----------------- "УСТАНОВИТЬ КОММЕНТАРИЙ" CONFIRMATION ----------------- */
+  /* ----------------- "УСТАНОВИТЬ / СМЕНИТЬ КОММЕНТАРИЙ" CONFIRMATION ----------------- */
   const handleConfirmCommentCirclePosition = () => {
     if (!currentCell) return;
-    const rect = containerRef.current?.getBoundingClientRect();
-    const screenCenterX = (rect?.width || window.innerWidth) / 2;
-    const screenCenterY = (rect?.height || window.innerHeight) / 2;
-
     const anchor = getAnchor();
-    const imgX = anchor.x + (screenCenterX - (screenCenterX + offsetX)) / scale;
-    const imgY = anchor.y + (screenCenterY - (screenCenterY + offsetY)) / scale;
 
-    // Visual radius in screen pixels is 32px; convert to drawing units
+    // Exact image coordinate currently sitting at the center crosshair of viewport
+    const imgX = anchor.x - offsetX / scale;
+    const imgY = anchor.y - offsetY / scale;
+
     const radiusInDrawingUnits = 32 / scale;
 
-    const newComment: Partial<CommentCircle> = {
-      id: `comm_${Date.now()}`,
-      x: Math.round(imgX),
-      y: Math.round(imgY),
-      radius: radiusInDrawingUnits,
-      title: '',
-      text: '',
-      createdAt: Date.now(),
+    if (repositioningCommentId) {
+      // Reposition existing comment
+      const existing = currentCell.comments.find((c) => c.id === repositioningCommentId);
+      const updatedComments = currentCell.comments.map((c) =>
+        c.id === repositioningCommentId
+          ? { ...c, x: Math.round(imgX), y: Math.round(imgY), radius: radiusInDrawingUnits }
+          : c
+      );
+
+      onUpdateArray({
+        ...array,
+        cells: {
+          ...array.cells,
+          [currentKey]: {
+            ...currentCell,
+            comments: updatedComments,
+          },
+        },
+      });
+
+      setIsSettingComment(false);
+      setRepositioningCommentId(null);
+
+      // Re-open editor with updated coordinates
+      if (existing) {
+        setEditingComment({
+          comment: {
+            ...existing,
+            x: Math.round(imgX),
+            y: Math.round(imgY),
+            radius: radiusInDrawingUnits,
+          },
+          isNew: false,
+        });
+      }
+    } else {
+      // Creating a new comment
+      const newComment: Partial<CommentCircle> = {
+        id: `comm_${Date.now()}`,
+        x: Math.round(imgX),
+        y: Math.round(imgY),
+        radius: radiusInDrawingUnits,
+        title: '',
+        text: '',
+        createdAt: Date.now(),
+      };
+
+      setIsSettingComment(false);
+      setEditingComment({ comment: newComment, isNew: true });
+    }
+  };
+
+  /* ----------------- TRIGGER REPOSITIONING FROM MODAL ----------------- */
+  const handleStartRepositioning = (draftTitle: string, draftText: string) => {
+    if (!editingComment || !currentCell) return;
+    const target = editingComment.comment;
+    const commentId = target.id || `comm_${Date.now()}`;
+
+    // Update memory with current draft text so nothing is lost
+    const updatedDraft: Partial<CommentCircle> = {
+      ...target,
+      id: commentId,
+      title: draftTitle,
+      text: draftText,
     };
 
-    setIsSettingComment(false);
-    setEditingComment({ comment: newComment, isNew: true });
+    setEditingComment({ comment: updatedDraft, isNew: editingComment.isNew });
+    setRepositioningCommentId(commentId);
+    setEditingComment(null); // Close modal
+    setIsSettingComment(true); // Open viewport target mode
+
+    // If comment already had position, center viewport on it so user sees current anchor
+    const anchor = getAnchor();
+    if (typeof target.x === 'number' && typeof target.y === 'number') {
+      const targetOffsetX = -(target.x - anchor.x) * scale;
+      const targetOffsetY = -(target.y - anchor.y) * scale;
+      const clamped = clampOffsets(targetOffsetX, targetOffsetY, scale);
+      setOffsetX(clamped.x);
+      setOffsetY(clamped.y);
+    }
   };
 
   /* ----------------- COMMENT CIRCLE TOUCH HANDLERS ----------------- */
@@ -601,132 +681,127 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
         key={currentKey}
         className={`absolute inset-0 will-change-transform ${transitionAnimClass}`}
       >
-        {/* Drawing Viewport Layer */}
-        <div
-          className="absolute inset-0 pointer-events-none flex items-center justify-center will-change-transform"
-          style={{
-            transform: `translate3d(${offsetX}px, ${offsetY}px, 0)`,
-          }}
-        >
-          {currentCell?.imageDataUrl ? (
-            <div
-              className="relative"
-              style={{
-                width: `${currentCell.imageWidth}px`,
-                height: `${currentCell.imageHeight}px`,
-                transform: `scale(${scale}) translate3d(${-anchor.x + (currentCell.imageWidth / 2)}px, ${-anchor.y + (currentCell.imageHeight / 2)}px, 0)`,
-                transformOrigin: `${anchor.x}px ${anchor.y}px`,
-              }}
+        {/* Drawing Viewport Layer: Origin 0,0 translated to (screenCenterX + offsetX - anchor.x * scale) */}
+        {currentCell?.imageDataUrl ? (
+          <div
+            className="absolute left-0 top-0 will-change-transform pointer-events-none"
+            style={{
+              width: `${currentCell.imageWidth}px`,
+              height: `${currentCell.imageHeight}px`,
+              transformOrigin: '0 0',
+              transform: `translate3d(${screenCenterX + offsetX - anchor.x * scale}px, ${screenCenterY + offsetY - anchor.y * scale}px, 0) scale(${scale})`,
+            }}
+          >
+            {/* Base blueprint image */}
+            <img
+              src={currentCell.imageDataUrl}
+              alt={currentCell.title}
+              className="w-full h-full object-contain pointer-events-none block"
+              draggable={false}
+            />
+
+            {/* Independent Comment Layer on top of the drawing */}
+            <svg
+              className="absolute inset-0 w-full h-full pointer-events-auto"
+              style={{ overflow: 'visible' }}
             >
-              {/* Base blueprint image */}
-              <img
-                src={currentCell.imageDataUrl}
-                alt={currentCell.title}
-                className="w-full h-full object-contain pointer-events-none"
-                draggable={false}
-              />
+              {currentCell.comments.map((comm) => {
+                // Circle visual sizing per eye mode
+                const r =
+                  eyeMode === EyeDisplayMode.UNIFORM_SIZE
+                    ? 32 / scale
+                    : comm.radius;
 
-              {/* Independent Comment Layer on top of the drawing */}
-              <svg
-                className="absolute inset-0 w-full h-full pointer-events-auto"
-                style={{ overflow: 'visible' }}
-              >
-                {currentCell.comments.map((comm) => {
-                  // Circle visual sizing per eye mode
-                  const r =
-                    eyeMode === EyeDisplayMode.UNIFORM_SIZE
-                      ? 32 / scale
-                      : comm.radius;
+                // Blinking opacity in mode 2
+                const circleClass =
+                  eyeMode === EyeDisplayMode.BLINKING
+                    ? 'animate-pulse fill-amber-500/40 stroke-amber-300 stroke-2'
+                    : 'fill-amber-500/25 stroke-amber-400 stroke-2';
 
-                  // Blinking opacity in mode 2
-                  const circleClass =
-                    eyeMode === EyeDisplayMode.BLINKING
-                      ? 'animate-pulse fill-amber-500/40 stroke-amber-300 stroke-2'
-                      : 'fill-amber-500/25 stroke-amber-400 stroke-2';
+                // Scaled label text size
+                const fontSize = Math.max(12 / scale, r * 0.45);
 
-                  // Scaled label text size
-                  const fontSize = Math.max(12 / scale, r * 0.45);
-
-                  return (
-                    <g
-                      key={comm.id}
-                      className="cursor-pointer pointer-events-auto"
-                      onTouchStart={() => handleCommentCircleTouchStart(comm)}
-                      onTouchEnd={() => handleCommentCircleTouchEnd(comm)}
-                      onDoubleClick={() => setReadingComment(comm)}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        setEditingComment({ comment: comm, isNew: false });
-                      }}
-                    >
-                      {/* Circle Anchor */}
-                      <circle
-                        cx={comm.x}
-                        cy={comm.y}
-                        r={r}
-                        className={circleClass}
-                      />
-                      <circle
-                        cx={comm.x}
-                        cy={comm.y}
-                        r={Math.max(2, 4 / scale)}
-                        fill="#f59e0b"
-                      />
-
-                      {/* Short Title Label above circle */}
-                      {comm.title && (
-                        <text
-                          x={comm.x}
-                          y={comm.y - r - 6 / scale}
-                          textAnchor="middle"
-                          fill="#fde68a"
-                          fontSize={fontSize}
-                          fontWeight="bold"
-                          className="drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]"
-                        >
-                          {comm.title}
-                        </text>
-                      )}
-                    </g>
-                  );
-                })}
-
-                {/* Visual mark for "Общая точка" (subtle guide) */}
-                {currentCell.commonPoint && (
-                  <g opacity={0.65}>
+                return (
+                  <g
+                    key={comm.id}
+                    className="cursor-pointer pointer-events-auto"
+                    onTouchStart={() => handleCommentCircleTouchStart(comm)}
+                    onTouchEnd={() => handleCommentCircleTouchEnd(comm)}
+                    onDoubleClick={() => setReadingComment(comm)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setEditingComment({ comment: comm, isNew: false });
+                    }}
+                  >
+                    {/* Circle Anchor */}
                     <circle
-                      cx={currentCell.commonPoint.x}
-                      cy={currentCell.commonPoint.y}
-                      r={8 / scale}
-                      fill="none"
-                      stroke="#06b6d4"
-                      strokeWidth={2 / scale}
-                      strokeDasharray={`${3 / scale},${3 / scale}`}
+                      cx={comm.x}
+                      cy={comm.y}
+                      r={r}
+                      className={circleClass}
                     />
-                    <line
-                      x1={currentCell.commonPoint.x - 14 / scale}
-                      y1={currentCell.commonPoint.y}
-                      x2={currentCell.commonPoint.x + 14 / scale}
-                      y2={currentCell.commonPoint.y}
-                      stroke="#06b6d4"
-                      strokeWidth={1.5 / scale}
+                    <circle
+                      cx={comm.x}
+                      cy={comm.y}
+                      r={Math.max(2, 4 / scale)}
+                      fill="#f59e0b"
                     />
-                    <line
-                      x1={currentCell.commonPoint.x}
-                      y1={currentCell.commonPoint.y - 14 / scale}
-                      x2={currentCell.commonPoint.x}
-                      y2={currentCell.commonPoint.y + 14 / scale}
-                      stroke="#06b6d4"
-                      strokeWidth={1.5 / scale}
-                    />
+
+                    {/* Short Title Label above circle */}
+                    {comm.title && (
+                      <text
+                        x={comm.x}
+                        y={comm.y - r - 6 / scale}
+                        textAnchor="middle"
+                        fill="#fde68a"
+                        fontSize={fontSize}
+                        fontWeight="bold"
+                        className="drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]"
+                      >
+                        {comm.title}
+                      </text>
+                    )}
                   </g>
-                )}
-              </svg>
-            </div>
-          ) : (
-            <div className="text-slate-500 text-sm">Чертеж не загружен в ячейку</div>
-          )}
-        </div>
+                );
+              })}
+
+              {/* Visual mark for "Общая точка" (subtle guide) */}
+              {currentCell.commonPoint && (
+                <g opacity={0.65}>
+                  <circle
+                    cx={currentCell.commonPoint.x}
+                    cy={currentCell.commonPoint.y}
+                    r={8 / scale}
+                    fill="none"
+                    stroke="#06b6d4"
+                    strokeWidth={2 / scale}
+                    strokeDasharray={`${3 / scale},${3 / scale}`}
+                  />
+                  <line
+                    x1={currentCell.commonPoint.x - 14 / scale}
+                    y1={currentCell.commonPoint.y}
+                    x2={currentCell.commonPoint.x + 14 / scale}
+                    y2={currentCell.commonPoint.y}
+                    stroke="#06b6d4"
+                    strokeWidth={1.5 / scale}
+                  />
+                  <line
+                    x1={currentCell.commonPoint.x}
+                    y1={currentCell.commonPoint.y - 14 / scale}
+                    x2={currentCell.commonPoint.x}
+                    y2={currentCell.commonPoint.y + 14 / scale}
+                    stroke="#06b6d4"
+                    strokeWidth={1.5 / scale}
+                  />
+                </g>
+              )}
+            </svg>
+          </div>
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
+            Чертеж не загружен в ячейку
+          </div>
+        )}
       </div>
 
       {/* Pulsating Target Circle in Center during Setting Modes */}
@@ -739,8 +814,12 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
             <div className="absolute w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_10px_#f59e0b]" />
             <div className="absolute w-10 h-0.5 bg-amber-400/70" />
             <div className="absolute h-10 w-0.5 bg-amber-400/70" />
-            <span className="absolute -top-7 text-[11px] font-bold text-amber-300 uppercase tracking-wider px-2 py-0.5 rounded bg-black/70">
-              {isSettingCommonPoint ? 'Общая точка' : 'Кружок комментария'}
+            <span className="absolute -top-7 text-[11px] font-bold text-amber-300 uppercase tracking-wider px-2 py-0.5 rounded bg-black/70 shadow">
+              {isSettingCommonPoint
+                ? 'Общая точка'
+                : repositioningCommentId
+                ? 'Новое положение'
+                : 'Кружок комментария'}
             </span>
           </div>
         </div>
@@ -760,6 +839,7 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
               ? () => {
                   setIsSettingCommonPoint(false);
                   setIsSettingComment(false);
+                  setRepositioningCommentId(null);
                 }
               : onBack
           }
@@ -849,6 +929,7 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
           <button
             onClick={() => {
               setShowContextMenu(false);
+              setRepositioningCommentId(null);
               setIsSettingComment(true);
             }}
             className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-800 active:bg-slate-750 text-left font-semibold text-slate-200 transition"
@@ -1003,16 +1084,37 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
             </p>
             <div className="flex justify-between items-center text-[10px] text-slate-500 pt-2 border-t border-slate-800">
               <span>Кружок r = {Math.round(readingComment.radius)}px</span>
-              <button
-                onClick={() => {
-                  const comm = readingComment;
-                  setReadingComment(null);
-                  setEditingComment({ comment: comm, isNew: false });
-                }}
-                className="text-amber-400 underline font-semibold"
-              >
-                Редактировать
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    const comm = readingComment;
+                    setReadingComment(null);
+                    setRepositioningCommentId(comm.id);
+                    setIsSettingComment(true);
+                    // Center on comment
+                    const anchor = getAnchor();
+                    const targetOffsetX = -(comm.x - anchor.x) * scale;
+                    const targetOffsetY = -(comm.y - anchor.y) * scale;
+                    const clamped = clampOffsets(targetOffsetX, targetOffsetY, scale);
+                    setOffsetX(clamped.x);
+                    setOffsetY(clamped.y);
+                  }}
+                  className="text-cyan-400 underline font-semibold flex items-center gap-1"
+                >
+                  <Move size={12} />
+                  <span>Переместить</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const comm = readingComment;
+                    setReadingComment(null);
+                    setEditingComment({ comment: comm, isNew: false });
+                  }}
+                  className="text-amber-400 underline font-semibold"
+                >
+                  Редактировать
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1025,6 +1127,7 @@ export const ViewerMode: React.FC<ViewerModeProps> = ({
           onBack={() => setEditingComment(null)}
           onSave={handleSaveComment}
           onDelete={!editingComment.isNew ? handleDeleteComment : undefined}
+          onReposition={handleStartRepositioning}
         />
       )}
 

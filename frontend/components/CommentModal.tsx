@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Trash2, Check, MessageSquare, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Trash2, Check, MessageSquare, AlertTriangle, Move } from 'lucide-react';
 import { CommentCircle } from '../types';
 
 interface CommentModalProps {
@@ -7,6 +7,7 @@ interface CommentModalProps {
   onBack: () => void;
   onSave: (title: string, text: string) => void;
   onDelete?: () => void;
+  onReposition?: (currentTitle: string, currentText: string) => void;
 }
 
 export const CommentModal: React.FC<CommentModalProps> = ({
@@ -14,6 +15,7 @@ export const CommentModal: React.FC<CommentModalProps> = ({
   onBack,
   onSave,
   onDelete,
+  onReposition,
 }) => {
   const [title, setTitle] = useState<string>(comment.title || '');
   const [text, setText] = useState<string>(comment.text || '');
@@ -42,7 +44,7 @@ export const CommentModal: React.FC<CommentModalProps> = ({
       </div>
 
       {/* Inputs Form */}
-      <div className="flex flex-col gap-5 my-auto max-w-md w-full mx-auto">
+      <div className="flex flex-col gap-4 my-auto max-w-md w-full mx-auto">
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
             Короткое название (метка над кружком)
@@ -64,7 +66,7 @@ export const CommentModal: React.FC<CommentModalProps> = ({
             Текст комментария
           </label>
           <textarea
-            rows={5}
+            rows={4}
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Подробное описание замечания, требования или указания для монтажников..."
@@ -74,6 +76,18 @@ export const CommentModal: React.FC<CommentModalProps> = ({
             Открывается при двойном касании кружка в режиме просмотра
           </span>
         </div>
+
+        {/* Change position button */}
+        {onReposition && (
+          <button
+            type="button"
+            onClick={() => onReposition(title, text)}
+            className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-850 active:scale-[0.98] text-amber-400 font-bold text-xs border border-amber-500/40 shadow-md transition"
+          >
+            <Move size={16} className="text-amber-400" />
+            <span>Изменить положение кружка на чертеже</span>
+          </button>
+        )}
       </div>
 
       {/* Delete Confirmation Popup */}
