@@ -23,19 +23,18 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # 1. Сборка веб-приложения через Vite
+      # 1. Сборка веб-приложения — работает ТОЛЬКО в папке frontend
       - name: Build web app
         working-directory: frontend
         run: |
           npm install
           npm run build
 
+      # 2. Capacitor — работает ТОЛЬКО в корне репозитория (без working-directory!)
       - name: Setup Capacitor and generate Android project
         run: |
-          # Убираем испорченный ts-конфиг, если остался от прошлых запусков
           rm -f capacitor.config.ts
 
-          # Создаём JSON-конфиг (читается без TypeScript)
           cat > capacitor.config.json << 'EOF'
           {
             "appId": "ru.kotlovan.app",
@@ -43,14 +42,26 @@ jobs:
             "webDir": "frontend/dist"
           }
           EOF
-      # 3. Сборка APK через Gradle
+
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+
+          # Диагностика: убедимся, что dist существует
+          ls -la frontend/dist || { echo "ОШИБКА: frontend/dist не найден — сборка Vite не удалась"; exit 1; }
+
+          npx cap add android
+          npx cap sync android
+
+          # Диагностика: папка android должна появиться в корне
+          ls -la android
+
+      # 3. Сборка APK — тоже из корня
       - name: Build APK
         run: |
           chmod +x android/gradlew
           cd android
           ./gradlew assembleDebug
 
-      # 4. Сохранение APK в артефакты (скачать из вкладки Actions)
+      # 4. Сохранение APK в артефакты
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
