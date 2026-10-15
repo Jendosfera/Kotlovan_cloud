@@ -1,8 +1,8 @@
 export interface CommentCircle {
   id: string;
-  x: number; // coordinates relative to raw image pixel dimensions
+  x: number; // координаты относительно пикселей исходного чертежа
   y: number;
-  radius: number; // drawing units radius
+  radius: number; // радиус в единицах чертежа
   title: string;
   text: string;
   createdAt: number;
@@ -33,7 +33,7 @@ export interface BlueprintArray {
   cols: number;
   createdAt: number;
   updatedAt: number;
-  cells: { [key: string]: CellData }; // key format: "r_c"
+  cells: { [key: string]: CellData }; // ключ в формате "r_c"
   lastViewedCell?: { row: number; col: number };
   globalScale?: number;
   globalOffsetX?: number;
@@ -41,19 +41,18 @@ export interface BlueprintArray {
 }
 
 export enum EyeDisplayMode {
-  STANDARD = 'STANDARD', // Half-closed eye, normal saved circle sizes
-  BLINKING = 'BLINKING', // Open eye, contracted pupil, blinking circles
-  UNIFORM_SIZE = 'UNIFORM_SIZE', // Open eye, dilated pupil, uniform fixed screen size
+  STANDARD = 'STANDARD', // Полуприкрытый глаз, исходный сохраненный размер
+  BLINKING = 'BLINKING', // Открытый глаз, суженный зрачок, мерцание
+  UNIFORM_SIZE = 'UNIFORM_SIZE', // Открытый глаз, расширенный зрачок, одинаковый размер
 }
 
 export interface ViewerUISettings {
-  iconScale: number; // x0.1 to x3.0
-  iconOpacity: number; // 0.1 to 1.0 (10% to 100%)
+  iconScale: number; // x0.1 до x3.0
+  iconOpacity: number; // 0.1 до 1.0 (10% до 100%)
 }
 
 export type AppScreen =
   | 'MAIN_MENU'
-  | 'CREATE_ARRAY'
   | 'ARRAY_BUILDER'
   | 'CELL_EDITOR'
   | 'VIEWER';

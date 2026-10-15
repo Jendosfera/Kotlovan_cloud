@@ -22,7 +22,7 @@ export const setAttachedFileName = (name: string | null): void => {
       localStorage.removeItem(ATTACHED_FILE_NAME_KEY);
     }
   } catch {
-    // Ignore quota / permission errors
+    // Ignore quota / storage permission errors
   }
 };
 
@@ -67,7 +67,7 @@ export const loadActiveArrayFromStorage = (): BlueprintArray | null => {
 };
 
 /**
- * Write updated array directly to the user-selected file on the device
+ * Write updated array directly to user-selected file on the device
  */
 export const syncArrayToFileHandle = async (array: BlueprintArray): Promise<boolean> => {
   saveActiveArrayToStorage(array);
@@ -98,7 +98,7 @@ export const chooseSaveLocationAndExport = async (
   const safeName = array.name.replace(/[^a-zA-Zа-яА-Я0-9_-]/g, '_') || 'massiv_kotlovan';
   const defaultFileName = `${safeName}_config.json`;
 
-  // Check if modern File System Access API is available in browser / WebView
+  // Check if File System Access API is supported
   if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
     try {
       const pickerOptions: SaveFilePickerOptions = {
@@ -133,21 +133,24 @@ export const chooseSaveLocationAndExport = async (
     }
   }
 
-  // Fallback for browsers without File System Access API: standard download trigger
+  // Fallback for environments without File System Access API
+  exportArrayToJsonFile(array);
+  setAttachedFileName(defaultFileName);
+  return { success: true, fileName: defaultFileName };
+};
+
+export const exportArrayToJsonFile = (array: BlueprintArray): void => {
   const jsonStr = serializeArrayConfig(array);
   const blob = new Blob([jsonStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
+  const safeName = array.name.replace(/[^a-zA-Zа-яА-Я0-9_-]/g, '_') || 'massiv_kotlovan';
   a.href = url;
-  a.download = defaultFileName;
+  a.download = `${safeName}_config.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-
-  setAttachedFileName(defaultFileName);
-  saveActiveArrayToStorage(array);
-  return { success: true, fileName: defaultFileName };
 };
 
 export const parseArrayConfigFile = async (file: File): Promise<BlueprintArray> => {

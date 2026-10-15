@@ -8,7 +8,6 @@ import {
   getAttachedFileName,
 } from './services/storageService';
 import { MainMenu } from './components/MainMenu';
-import { ArrayConfigModal } from './components/ArrayConfigModal';
 import { ArrayBuilder } from './components/ArrayBuilder';
 import { CellCardModal } from './components/CellCardModal';
 import { ViewerMode } from './components/ViewerMode';
@@ -76,18 +75,13 @@ export const App: React.FC = () => {
     };
   }, [flushCurrentArrayToFile]);
 
-  // Handler: Start creating array
+  // Handler: Start creating array directly inside the cell builder!
   const handleStartCreate = () => {
-    setScreen('CREATE_ARRAY');
-  };
-
-  // Handler: Confirm array dimensions
-  const handleConfirmArrayDimensions = (rows: number, cols: number, name: string) => {
     const newArr: BlueprintArray = {
       id: `arr_${Date.now()}`,
-      name,
-      rows,
-      cols,
+      name: 'Новый массив чертежей',
+      rows: 1,
+      cols: 1,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       cells: {},
@@ -110,17 +104,30 @@ export const App: React.FC = () => {
     setScreen('CELL_EDITOR');
   };
 
-  // Handler: Confirm cell card data
+  // Handler: Confirm cell card data & update dynamic array bounds
   const handleConfirmCell = (cellData: CellData) => {
     if (!currentArray) return;
     const key = `${cellData.row}_${cellData.col}`;
+    const nextCells = {
+      ...currentArray.cells,
+      [key]: cellData,
+    };
+
+    const keys = Object.keys(nextCells);
+    let r0 = 0, r1 = 0, c0 = 0, c1 = 0;
+    if (keys.length > 0) {
+      r0 = Math.min(...keys.map((k) => nextCells[k].row));
+      r1 = Math.max(...keys.map((k) => nextCells[k].row));
+      c0 = Math.min(...keys.map((k) => nextCells[k].col));
+      c1 = Math.max(...keys.map((k) => nextCells[k].col));
+    }
+
     const updated: BlueprintArray = {
       ...currentArray,
+      rows: Math.max(1, r1 - r0 + 1),
+      cols: Math.max(1, c1 - c0 + 1),
       updatedAt: Date.now(),
-      cells: {
-        ...currentArray.cells,
-        [key]: cellData,
-      },
+      cells: nextCells,
     };
     setCurrentArray(updated);
     setScreen('ARRAY_BUILDER');
@@ -139,7 +146,6 @@ export const App: React.FC = () => {
     const res = await chooseSaveLocationAndExport(currentArray);
     if (res.success) {
       setActiveFileName(res.fileName);
-      // As requested: "После сохранения массива включается режим просмотра массива"
       setScreen('VIEWER');
     }
   };
@@ -155,13 +161,6 @@ export const App: React.FC = () => {
         />
       )}
 
-      {screen === 'CREATE_ARRAY' && (
-        <ArrayConfigModal
-          onBack={() => setScreen('MAIN_MENU')}
-          onConfirm={handleConfirmArrayDimensions}
-        />
-      )}
-
       {screen === 'ARRAY_BUILDER' && currentArray && (
         <ArrayBuilder
           array={currentArray}
@@ -170,6 +169,7 @@ export const App: React.FC = () => {
           onOpenCellEditor={handleOpenCellEditor}
           onSaveArray={handleSaveArrayToFile}
           onStartViewer={() => setScreen('VIEWER')}
+          onUpdateArray={(updated) => setCurrentArray(updated)}
         />
       )}
 
