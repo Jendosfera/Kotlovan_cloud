@@ -24,10 +24,16 @@ jobs:
           java-version: '21'
 
       # 1. Сборка веб-приложения — работает ТОЛЬКО в папке frontend
+      - name: Clean dependencies
+        run: |
+          rm -rf node_modules package-lock.json
+      - name: Install with npm ci
+        run: npm ci
+      
       - name: Build web app
         working-directory: frontend
         run: |
-          npm install
+         ### npm install
           npm run build
 
       # 2. Capacitor — работает ТОЛЬКО в корне репозитория (без working-directory!)
