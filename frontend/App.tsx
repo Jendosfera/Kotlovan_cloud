@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AppScreen, BlueprintArray, CellData } from './types';
 import {
   loadActiveArrayFromStorage,
   saveActiveArrayToStorage,
-  exportArrayToJsonFile,
+  chooseSaveLocationAndExport,
+  syncArrayToFileHandle,
+  getAttachedFileName,
 } from './services/storageService';
 import { MainMenu } from './components/MainMenu';
 import { ArrayConfigModal } from './components/ArrayConfigModal';
@@ -14,9 +16,22 @@ import { ViewerMode } from './components/ViewerMode';
 export const App: React.FC = () => {
   const [screen, setScreen] = useState<AppScreen>('MAIN_MENU');
   const [currentArray, setCurrentArray] = useState<BlueprintArray | null>(null);
+  const [activeFileName, setActiveFileName] = useState<string | null>(getAttachedFileName());
 
-  // Cell editor targeting
+  // Target coordinates for cell editor
   const [editingCellTarget, setEditingCellTarget] = useState<{ row: number; col: number } | null>(null);
+
+  // Keep ref for immediate flush on app close/minimize without closure staleness
+  const currentArrayRef = useRef<BlueprintArray | null>(null);
+  currentArrayRef.current = currentArray;
+
+  // Auto-sync function
+  const flushCurrentArrayToFile = useCallback(() => {
+    if (currentArrayRef.current) {
+      saveActiveArrayToStorage(currentArrayRef.current);
+      syncArrayToFileHandle(currentArrayRef.current);
+    }
+  }, []);
 
   // Load existing array from local storage on mount
   useEffect(() => {
@@ -26,12 +41,40 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // Sync to storage whenever currentArray updates
+  // Sync to storage & file whenever currentArray updates
   useEffect(() => {
     if (currentArray) {
       saveActiveArrayToStorage(currentArray);
+      syncArrayToFileHandle(currentArray);
     }
   }, [currentArray]);
+
+  // Hook listeners for app minimization, backgrounding, and closing
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushCurrentArrayToFile();
+      }
+    };
+
+    const handlePageHide = () => {
+      flushCurrentArrayToFile();
+    };
+
+    const handleBeforeUnload = () => {
+      flushCurrentArrayToFile();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [flushCurrentArrayToFile]);
 
   // Handler: Start creating array
   const handleStartCreate = () => {
@@ -57,6 +100,7 @@ export const App: React.FC = () => {
   // Handler: Loaded existing or demo array
   const handleArrayLoaded = (arr: BlueprintArray) => {
     setCurrentArray(arr);
+    setActiveFileName(getAttachedFileName());
     setScreen('VIEWER');
   };
 
@@ -83,12 +127,21 @@ export const App: React.FC = () => {
     setEditingCellTarget(null);
   };
 
-  // Handler: Save array to device storage
-  const handleSaveArrayToFile = () => {
+  // Handler: Return to main menu with auto-save to file
+  const handleReturnToMainMenu = () => {
+    flushCurrentArrayToFile();
+    setScreen('MAIN_MENU');
+  };
+
+  // Handler: Save array to device storage with location picker
+  const handleSaveArrayToFile = async () => {
     if (!currentArray) return;
-    exportArrayToJsonFile(currentArray);
-    // After saving, switch to viewer mode as requested
-    setScreen('VIEWER');
+    const res = await chooseSaveLocationAndExport(currentArray);
+    if (res.success) {
+      setActiveFileName(res.fileName);
+      // As requested: "После сохранения массива включается режим просмотра массива"
+      setScreen('VIEWER');
+    }
   };
 
   return (
@@ -112,7 +165,8 @@ export const App: React.FC = () => {
       {screen === 'ARRAY_BUILDER' && currentArray && (
         <ArrayBuilder
           array={currentArray}
-          onBack={() => setScreen('MAIN_MENU')}
+          attachedFileName={activeFileName}
+          onBack={handleReturnToMainMenu}
           onOpenCellEditor={handleOpenCellEditor}
           onSaveArray={handleSaveArrayToFile}
           onStartViewer={() => setScreen('VIEWER')}

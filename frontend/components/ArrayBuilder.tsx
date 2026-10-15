@@ -1,23 +1,26 @@
-import React from 'react';
-import { ArrowLeft, Save, Play, Plus, Image as ImageIcon } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowLeft, Save, Play, Plus, Image as ImageIcon, HardDrive, CheckCircle2 } from 'lucide-react';
 import { BlueprintArray } from '../types';
 
 interface ArrayBuilderProps {
   array: BlueprintArray;
+  attachedFileName?: string | null;
   onBack: () => void;
   onOpenCellEditor: (row: number, col: number) => void;
-  onSaveArray: () => void;
+  onSaveArray: () => Promise<void> | void;
   onStartViewer: () => void;
 }
 
 export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
   array,
+  attachedFileName,
   onBack,
   onOpenCellEditor,
   onSaveArray,
   onStartViewer,
 }) => {
   const { rows, cols, cells } = array;
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
   // Determine which cells have content or should display the 3D "+" button
   const hasAnyCell = Object.keys(cells).length > 0;
@@ -37,6 +40,15 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
     const topFilled = r > 0 && !!cells[`${r - 1}_${c}`];
 
     return leftFilled || topFilled;
+  };
+
+  const handleSaveClick = async () => {
+    try {
+      setIsSaving(true);
+      await onSaveArray();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -60,6 +72,15 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
         </div>
         <div className="w-9"></div>
       </div>
+
+      {/* Connected storage status indicator */}
+      {attachedFileName && (
+        <div className="mx-4 mt-3 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-emerald-500/30 flex items-center gap-2 text-xs text-slate-300">
+          <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
+          <span className="text-slate-400">Файл массива:</span>
+          <span className="font-semibold text-emerald-300 truncate">{attachedFileName}</span>
+        </div>
+      )}
 
       {/* Visual Array Grid */}
       <div className="flex-1 overflow-auto p-6 flex items-center justify-center">
@@ -142,24 +163,31 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
       </div>
 
       {/* Bottom Actions */}
-      <div className="p-4 bg-slate-900/80 border-t border-slate-800 flex gap-3 backdrop-blur-sm">
-        <button
-          onClick={onSaveArray}
-          className="flex-1 flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-100 font-bold text-sm border border-slate-700 transition"
-        >
-          <Save size={18} className="text-amber-400" />
-          <span>Сохранить массив</span>
-        </button>
-
-        {hasAnyCell && (
+      <div className="p-4 bg-slate-900/80 border-t border-slate-800 flex flex-col gap-2 backdrop-blur-sm">
+        <div className="flex gap-3">
           <button
-            onClick={onStartViewer}
-            className="flex-1 flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-extrabold text-sm shadow-lg shadow-amber-950/40 transition"
+            onClick={handleSaveClick}
+            disabled={isSaving}
+            className="flex-1 flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-100 font-bold text-sm border border-slate-700 disabled:opacity-50 transition"
           >
-            <Play size={18} className="fill-slate-950" />
-            <span>В просмотр</span>
+            <HardDrive size={18} className="text-amber-400" />
+            <span>{isSaving ? 'Выбор места...' : 'Сохранить массив'}</span>
           </button>
-        )}
+
+          {hasAnyCell && (
+            <button
+              onClick={onStartViewer}
+              className="flex-1 flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-extrabold text-sm shadow-lg shadow-amber-950/40 transition"
+            >
+              <Play size={18} className="fill-slate-950" />
+              <span>В просмотр</span>
+            </button>
+          )}
+        </div>
+
+        <div className="text-center text-[10px] text-slate-500">
+          Сохранение при выходе, сворачивании и возврате в меню настроено автоматически
+        </div>
       </div>
     </div>
   );
