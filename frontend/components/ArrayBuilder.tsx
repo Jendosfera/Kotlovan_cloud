@@ -11,12 +11,17 @@ import {
   ZoomOut,
   Maximize2,
   X,
+  FolderLock,
+  ShieldCheck,
+  AlertCircle,
+  FileCheck2,
 } from 'lucide-react';
 import { BlueprintArray, CellData } from '../types';
 
 interface ArrayBuilderProps {
   array: BlueprintArray;
   attachedFileName?: string | null;
+  attachedFolderName?: string | null;
   onBack: () => void;
   onOpenCellEditor: (row: number, col: number) => void;
   onSaveArray: () => Promise<void> | void;
@@ -27,6 +32,7 @@ interface ArrayBuilderProps {
 export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
   array,
   attachedFileName,
+  attachedFolderName,
   onBack,
   onOpenCellEditor,
   onSaveArray,
@@ -35,6 +41,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
 }) => {
   const { cells } = array;
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [showAndroidPermissionModal, setShowAndroidPermissionModal] = useState<boolean>(false);
 
   // Canvas viewport navigation (scale and translation)
   const [canvasScale, setCanvasScale] = useState<number>(1.0);
@@ -279,7 +286,8 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
     });
   };
 
-  const handleSaveClick = async () => {
+  const handleTriggerSave = async () => {
+    setShowAndroidPermissionModal(false);
     try {
       setIsSaving(true);
       await onSaveArray();
@@ -345,11 +353,13 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
           </div>
         )}
 
-        {attachedFileName && (
+        {(attachedFolderName || attachedFileName) && (
           <div className="px-3 py-1.5 rounded-xl bg-slate-900/90 border border-emerald-500/30 flex items-center gap-2 text-xs text-slate-300">
             <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
-            <span className="text-slate-400">Файл массива:</span>
-            <span className="font-semibold text-emerald-300 truncate">{attachedFileName}</span>
+            <span className="text-slate-400">Папка устройства:</span>
+            <span className="font-semibold text-emerald-300 truncate">
+              {attachedFolderName || 'Хранилище'} / {attachedFileName || 'config.json'}
+            </span>
           </div>
         )}
       </div>
@@ -514,16 +524,63 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
         </div>
       </div>
 
+      {/* Android Storage Permission Modal Dialog */}
+      {showAndroidPermissionModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-amber-500/50 rounded-3xl p-6 max-w-sm w-full flex flex-col gap-4 shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+              <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-400">
+                <FolderLock size={26} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-100">Доступ к хранилищу Android</h3>
+                <p className="text-[11px] text-slate-400">Сохранение папки массива</p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2.5 text-xs text-slate-300 leading-relaxed">
+              <div className="flex items-start gap-2">
+                <ShieldCheck size={18} className="text-emerald-400 shrink-0 mt-0.5" />
+                <span>
+                  Приложению требуется разрешение на запись в выбранную папку вашего устройства (например, «Документы» или «Загрузки»).
+                </span>
+              </div>
+              <div className="flex items-start gap-2">
+                <FileCheck2 size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                <span>
+                  В папку запишется файл конфигурации <b>.json</b> и сканы всех чертежей для автономной работы и передачи между телефонами.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex gap-2.5 pt-2">
+              <button
+                onClick={() => setShowAndroidPermissionModal(false)}
+                className="flex-1 py-3 px-4 rounded-xl bg-slate-800 text-slate-300 font-semibold text-xs hover:bg-slate-700 transition"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleTriggerSave}
+                className="flex-1 py-3 px-4 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 shadow-lg transition"
+              >
+                Выбрать папку
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bottom Actions */}
       <div className="p-4 bg-slate-900/90 border-t border-slate-800 flex flex-col gap-2 backdrop-blur-md z-20">
         <div className="flex gap-3">
           <button
-            onClick={handleSaveClick}
+            onClick={() => setShowAndroidPermissionModal(true)}
             disabled={isSaving}
             className="flex-1 flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-100 font-bold text-sm border border-slate-700 disabled:opacity-50 transition"
           >
             <HardDrive size={18} className="text-amber-400" />
-            <span>{isSaving ? 'Выбор места...' : 'Сохранить массив'}</span>
+            <span>{isSaving ? 'Запрос папки...' : 'Сохранить массив'}</span>
           </button>
 
           {hasAnyCell && (

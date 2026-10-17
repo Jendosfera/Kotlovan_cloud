@@ -6,6 +6,7 @@ import {
   chooseSaveLocationAndExport,
   syncArrayToFileHandle,
   getAttachedFileName,
+  getAttachedFolderName,
 } from './services/storageService';
 import { MainMenu } from './components/MainMenu';
 import { ArrayBuilder } from './components/ArrayBuilder';
@@ -16,6 +17,7 @@ export const App: React.FC = () => {
   const [screen, setScreen] = useState<AppScreen>('MAIN_MENU');
   const [currentArray, setCurrentArray] = useState<BlueprintArray | null>(null);
   const [activeFileName, setActiveFileName] = useState<string | null>(getAttachedFileName());
+  const [activeFolderName, setActiveFolderName] = useState<string | null>(getAttachedFolderName());
 
   // Target coordinates for cell editor
   const [editingCellTarget, setEditingCellTarget] = useState<{ row: number; col: number } | null>(null);
@@ -37,6 +39,8 @@ export const App: React.FC = () => {
     const saved = loadActiveArrayFromStorage();
     if (saved) {
       setCurrentArray(saved);
+      setActiveFileName(getAttachedFileName());
+      setActiveFolderName(getAttachedFolderName());
     }
   }, []);
 
@@ -95,6 +99,7 @@ export const App: React.FC = () => {
   const handleArrayLoaded = (arr: BlueprintArray) => {
     setCurrentArray(arr);
     setActiveFileName(getAttachedFileName());
+    setActiveFolderName(getAttachedFolderName());
     setScreen('VIEWER');
   };
 
@@ -140,12 +145,15 @@ export const App: React.FC = () => {
     setScreen('MAIN_MENU');
   };
 
-  // Handler: Save array to device storage with location picker
+  // Handler: Save array to device storage with folder selection and permissions
   const handleSaveArrayToFile = async () => {
     if (!currentArray) return;
     const res = await chooseSaveLocationAndExport(currentArray);
     if (res.success) {
       setActiveFileName(res.fileName);
+      if (res.folderName) {
+        setActiveFolderName(res.folderName);
+      }
       setScreen('VIEWER');
     }
   };
@@ -165,6 +173,7 @@ export const App: React.FC = () => {
         <ArrayBuilder
           array={currentArray}
           attachedFileName={activeFileName}
+          attachedFolderName={activeFolderName}
           onBack={handleReturnToMainMenu}
           onOpenCellEditor={handleOpenCellEditor}
           onSaveArray={handleSaveArrayToFile}
