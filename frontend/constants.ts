@@ -1,5 +1,45 @@
 import { BlueprintArray } from './types';
 
+// ==========================================
+// ТЕКСТОВЫЕ КОНСТАНТЫ И СООБЩЕНИЯ (I18N / UX)
+// ==========================================
+export const STORAGE_MESSAGES = {
+  // Объяснения перед запросом разрешений
+  RATIONALE_TITLE: 'Доступ к хранилищу Android',
+  RATIONALE_DESC: 'Приложению необходим доступ к выбранной папке для сохранения чертежей, сканов и комментариев с автоматической синхронизацией.',
+  RATIONALE_CONFIRM: 'Разрешить доступ',
+  RATIONALE_CANCEL: 'Не сейчас',
+
+  // Предупреждения по матрице API и SAF
+  SAF_RECOMMENDED_TITLE: 'Рекомендуется Storage Access Framework (SAF)',
+  SAF_RECOMMENDED_DESC: 'SAF позволяет выбрать любую папку на телефоне или SD-карте без запроса опасного разрешения MANAGE_EXTERNAL_STORAGE. Это гарантирует полную безопасность и прохождение проверки Google Play.',
+  WARNING_MANAGE_STORAGE: 'Разрешение «Все файлы» (MANAGE_EXTERNAL_STORAGE) несет высокий риск отклонения в Google Play для строительных утилит. Используйте безопасный SAF (Вариант B).',
+
+  // Ошибки
+  ERR_PERMISSION_DENIED: 'Доступ к файловой системе отклонен. Сохранение в память устройства заблокировано.',
+  ERR_PERMANENTLY_DENIED: 'Разрешение отклонено навсегда. Для сохранения откройте настройки приложения.',
+  ERR_NOT_FOUND: 'Файл или папка не найдены на устройстве.',
+  ERR_FILE_EXISTS: 'Файл с таким именем уже существует в выбранной папке.',
+  ERR_INVALID_PATH: 'Указан недопустимый путь к файлу или папке.',
+  ERR_READ_ACCESS: 'Не удалось прочитать скан чертежа из памяти устройства.',
+  ERR_WRITE_ACCESS: 'Ошибка записи данных массива в выбранный каталог.',
+
+  // Кнопки и действия
+  BTN_OPEN_SETTINGS: 'Открыть настройки',
+  BTN_RETRY_PERMISSION: 'Запросить доступ снова',
+  BTN_CHOOSE_FOLDER_SAF: 'Выбрать папку (SAF)',
+  BTN_SAVE_ARRAY: 'Сохранить массив',
+  BTN_IN_VIEWER: 'В просмотр',
+
+  // Статусы
+  STATUS_GRANTED: 'Доступ предоставлен',
+  STATUS_DENIED: 'Доступ запрещен',
+  STATUS_PROMPT: 'Требуется подтверждение',
+  STATUS_LIMITED: 'Ограниченный доступ',
+  STATUS_UNSUPPORTED: 'Хранилище браузера / ПАК',
+  FOLDER_NOT_SET: 'Папка не выбрана',
+};
+
 // Procedurally generate clean architectural & MEP SVG data URLs for instant offline demo
 export const generateDemoBlueprint = (
   type: 'ARCH' | 'HVAC' | 'ELEC' | 'PLUMB',
@@ -17,7 +57,6 @@ export const generateDemoBlueprint = (
       <rect x="100" y="100" width="1000" height="600" fill="none" stroke="#64748b" stroke-width="6"/>
       <line x1="500" y1="100" x2="500" y2="700" stroke="#64748b" stroke-width="4"/>
       <line x1="100" y1="400" x2="1100" y2="400" stroke="#64748b" stroke-width="4"/>
-      <!-- Doors & Windows -->
       <path d="M 450,100 A 50,50 0 0,1 500,150" fill="none" stroke="#38bdf8" stroke-width="3" stroke-dasharray="4,4"/>
       <path d="M 1050,400 A 50,50 0 0,1 1100,450" fill="none" stroke="#38bdf8" stroke-width="3" stroke-dasharray="4,4"/>
       <rect x="250" y="94" width="120" height="12" fill="#0284c7"/>
@@ -33,7 +72,6 @@ export const generateDemoBlueprint = (
       <rect x="100" y="100" width="1000" height="600" fill="none" stroke="#334155" stroke-width="4"/>
       <line x1="500" y1="100" x2="500" y2="700" stroke="#334155" stroke-width="2"/>
       <line x1="100" y1="400" x2="1100" y2="400" stroke="#334155" stroke-width="2"/>
-      <!-- Air Ducts -->
       <rect x="180" y="220" width="80" height="60" fill="#0891b2" opacity="0.3"/>
       <path d="M 220,100 L 220,250 L 450,250 L 450,450 L 800,450" fill="none" stroke="#06b6d4" stroke-width="12" stroke-linecap="round"/>
       <path d="M 750,150 L 750,300 L 950,300" fill="none" stroke="#38bdf8" stroke-width="10" stroke-linecap="round" stroke-dasharray="10,5"/>
@@ -49,7 +87,6 @@ export const generateDemoBlueprint = (
       <rect x="100" y="100" width="1000" height="600" fill="none" stroke="#334155" stroke-width="4"/>
       <line x1="500" y1="100" x2="500" y2="700" stroke="#334155" stroke-width="2"/>
       <line x1="100" y1="400" x2="1100" y2="400" stroke="#334155" stroke-width="2"/>
-      <!-- Electrical Trays and Panels -->
       <rect x="120" y="420" width="40" height="70" fill="#f59e0b" stroke="#fbbf24" stroke-width="3"/>
       <text x="170" y="455" font-size="16" fill="#fbbf24" font-family="sans-serif">ЩР-1 (ВРУ)</text>
       <path d="M 140,420 L 140,280 L 350,280 L 350,200 L 850,200 L 850,550" fill="none" stroke="#eab308" stroke-width="6" stroke-dasharray="8,6"/>
@@ -64,7 +101,6 @@ export const generateDemoBlueprint = (
       <rect x="100" y="100" width="1000" height="600" fill="none" stroke="#334155" stroke-width="4"/>
       <line x1="500" y1="100" x2="500" y2="700" stroke="#334155" stroke-width="2"/>
       <line x1="100" y1="400" x2="1100" y2="400" stroke="#334155" stroke-width="2"/>
-      <!-- Water and Heating Pipes -->
       <path d="M 100,500 L 400,500 L 400,200 L 980,200" fill="none" stroke="#3b82f6" stroke-width="8"/>
       <path d="M 100,520 L 420,520 L 420,220 L 980,220" fill="none" stroke="#ef4444" stroke-width="8"/>
       <circle cx="400" cy="500" r="10" fill="#60a5fa"/>
@@ -82,16 +118,12 @@ export const generateDemoBlueprint = (
     </defs>
     <rect width="${width}" height="${height}" fill="#0f172a"/>
     <rect width="${width}" height="${height}" fill="url(#grid)" />
-    <!-- Outer Blueprint Border -->
     <rect x="20" y="20" width="${width - 40}" height="${height - 40}" fill="none" stroke="#334155" stroke-width="2"/>
-    <!-- Stamp -->
     <rect x="${width - 320}" y="${height - 110}" width="300" height="90" fill="#1e293b" stroke="#475569" stroke-width="2"/>
     <text x="${width - 305}" y="${height - 75}" font-size="18" fill="#f8fafc" font-family="sans-serif" font-weight="bold">${title}</text>
     <text x="${width - 305}" y="${height - 45}" font-size="13" fill="#94a3b8" font-family="sans-serif">ОБЪЕКТ: «КОТЛОВАН-ИНЖЕНЕРИЯ»</text>
     <text x="${width - 305}" y="${height - 25}" font-size="11" fill="#64748b" font-family="sans-serif">М 1:100 • ЛИСТ Р-1</text>
-    <!-- Architectural / Engineering Geometry -->
     ${linesContent}
-    <!-- Center reference anchor symbol -->
     <circle cx="500" cy="400" r="6" fill="${accentColor}" />
     <circle cx="500" cy="400" r="18" fill="none" stroke="${accentColor}" stroke-width="1.5" stroke-dasharray="3,3"/>
   </svg>`;
