@@ -1,0 +1,5 @@
+{
+  "appId": "com.kotlovan.app",
+  "appName": "Kotlovan",
+  "webDir": "frontend/dist"
+}

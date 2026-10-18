@@ -1,88 +1,50 @@
-name: Build APK
+name: Build Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 22
+          cache: npm
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@v5
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '21'
+          distribution: temurin
+          java-version: 21
 
-      # 1. Сборка веб-приложения — работает ТОЛЬКО в папке frontend
-      
-      - name: Build web app
-        working-directory: frontend
-        run: |
-          npm install
-          npm run build
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-      # 2. Capacitor — работает ТОЛЬКО в корне репозитория (без working-directory!)
-      - name: Setup Capacitor and generate Android project
-        run: |
-          rm -f capacitor.config.ts
+      - name: Install dependencies
+        run: npm ci
 
-          cat > capacitor.config.json << 'EOF'
-          {
-            "appId": "ru.kotlovan.app",
-            "appName": "Kotlovan",
-            "webDir": "frontend/dist"
-          }
-          EOF
+      - name: Build frontend
+        run: npm run build --prefix frontend
 
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+      - name: Sync Capacitor Android
+        run: npx cap sync android
 
-          # Диагностика: убедимся, что dist существует
-          ls -la frontend/dist || { echo "ОШИБКА: frontend/dist не найден — сборка Vite не удалась"; exit 1; }
-
-          npx cap add android
-          npx cap sync android
-
-          # Диагностика: папка android должна появиться в корне
-          ls -la android
-
-      # Разрешение конфликта kotlin-stdlib (jdk7/jdk8 дублируют классы со stdlib)
-      - name: Fix Kotlin stdlib duplicate classes
-        run: |
-          cat >> android/app/build.gradle << 'EOF'
-
-          dependencies {
-              constraints {
-                  implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22") {
-                      because("kotlin-stdlib-jdk7 is now a part of kotlin-stdlib")
-                  }
-                  implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22") {
-                      because("kotlin-stdlib-jdk8 is now a part of kotlin-stdlib")
-                  }
-              }
-          }
-          EOF
-
-
-      # 3. Сборка APK — тоже из корня
-      - name: Build APK
+      - name: Build debug APK
         run: |
           chmod +x android/gradlew
           cd android
           ./gradlew assembleDebug
 
-      # 4. Сохранение APK в артефакты
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
+          name: kotlovan-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk

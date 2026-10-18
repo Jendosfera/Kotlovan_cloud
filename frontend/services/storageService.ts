@@ -1,5 +1,58 @@
 import { BlueprintArray, CellData } from '../types';
 
+import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+
+const CONFIG_FOLDER = 'configs';
+
+function safeFileName(name: string): string {
+  const cleaned = name
+    .replace(/\.json$/i, '')
+    .replace(/[^a-zA-Z0-9а-яА-Я_-]/g, '_');
+
+  return `${cleaned || 'config'}.json`;
+}
+
+/** Сохраняет конфигурацию во внутреннем хранилище приложения. */
+export async function saveConfig(
+  name: string,
+  config: unknown,
+): Promise<string> {
+  const fileName = safeFileName(name);
+
+  const result = await Filesystem.writeFile({
+    path: `CONFIGFOLDER/{CONFIG_FOLDER}/CONFIGF​OLDER/{fileName}`,
+    data: JSON.stringify(config, null, 2),
+    directory: Directory.Data,
+    encoding: Encoding.UTF8,
+    recursive: true,
+  });
+
+  return result.uri;
+}
+
+/** Разбирает выбранный JSON-файл. */
+export async function loadConfigFile(file: File): Promise<unknown> {
+  const text = await file.text();
+  return JSON.parse(text);
+}
+
+/** Сохраняет и отправляет конфигурацию через системное меню Android. */
+export async function exportConfig(
+  name: string,
+  config: unknown,
+): Promise<void> {
+  const uri = await saveConfig(name, config);
+
+  await Share.share({
+    title: 'Экспорт конфигурации',
+    text: `Конфигурация ${safeFileName(name)}`,
+    files: [uri],
+    dialogTitle: 'Сохранить или отправить конфигурацию',
+  });
+}
+
+
 const STORAGE_KEY = 'kotlovan_active_array_v1';
 const ATTACHED_FOLDER_NAME_KEY = 'kotlovan_saf_folder_name_v1';
 const ATTACHED_FOLDER_URI_KEY = 'kotlovan_saf_folder_uri_v1';
