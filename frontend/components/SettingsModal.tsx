@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sliders, X, Check, Shield, Folder, RefreshCw, ExternalLink, AlertTriangle } from 'lucide-react';
 import { ViewerUISettings } from '../types';
-import { sound } from '../services/soundService';
+
 import {
   checkStoragePermission,
   requestStoragePermission,

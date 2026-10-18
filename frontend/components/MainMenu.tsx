@@ -4,7 +4,7 @@ import { BlueprintArray } from '../types';
 import { parseArrayConfigFile, getAttachedFolderName } from '../services/storageService';
 import { checkStoragePermission } from '../services/permissionService';
 import { createSampleDemoArray, STORAGE_MESSAGES } from '../constants';
-import { sound } from '../services/soundService';
+
 
 interface MainMenuProps {
   onStartCreate: () => void;
