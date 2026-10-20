@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Sliders, X, Check, Shield, Folder, RefreshCw, ExternalLink, AlertTriangle } from 'lucide-react';
+import { Sliders, X, Check, Shield, Folder, RefreshCw, ExternalLink, FileCode, Download } from 'lucide-react';
 import { ViewerUISettings } from '../types';
-
 import {
   checkStoragePermission,
   requestStoragePermission,
   openAppSettings,
   StoragePermissionState,
-} from '../services/permissionService';
-import { getAttachedFolderName, chooseSaveLocationAndExport } from '../services/storageService';
-import { STORAGE_MESSAGES } from '../constants';
+  getAttachedFolderName,
+} from '../services/storageService';
+import { STORAGE_MESSAGES, sound } from '../constants';
 
 interface SettingsModalProps {
   settings: ViewerUISettings;
@@ -20,6 +19,8 @@ interface SettingsModalProps {
 export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onChange, onClose }) => {
   const [permissionState, setPermissionState] = useState<StoragePermissionState>('prompt');
   const [currentFolder, setCurrentFolder] = useState<string>(getAttachedFolderName() || STORAGE_MESSAGES.FOLDER_NOT_SET);
+  const [showManifestViewer, setShowManifestViewer] = useState<boolean>(false);
+  const [manifestContent, setManifestContent] = useState<string>('');
 
   useEffect(() => {
     checkStoragePermission().then(setPermissionState);
@@ -34,6 +35,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onChange
   const handleOpenSettings = async () => {
     sound.playCursor();
     await openAppSettings();
+  };
+
+  const handleLoadManifest = async () => {
+    sound.playCursor();
+    try {
+      const res = await fetch('public/AndroidManifest.xml');
+      if (res.ok) {
+        const text = await res.text();
+        setManifestContent(text);
+        setShowManifestViewer(true);
+      }
+    } catch (err) {
+      console.warn('Could not fetch AndroidManifest.xml', err);
+    }
+  };
+
+  const handleDownloadManifest = () => {
+    sound.playConfirm();
+    const blob = new Blob([manifestContent], { type: 'text/xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'AndroidManifest.xml';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -98,6 +126,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onChange
               <span>{STORAGE_MESSAGES.BTN_OPEN_SETTINGS}</span>
             </button>
           </div>
+
+          <button
+            onClick={handleLoadManifest}
+            className="flex items-center justify-center gap-2 py-2 px-3 mt-1 rounded-lg bg-blue-900/80 hover:bg-blue-800 border border-slate-400 text-cyan-200 text-[11px] font-medium transition"
+          >
+            <FileCode size={14} className="text-amber-300" />
+            <span>Просмотреть AndroidManifest.xml</span>
+          </button>
         </div>
 
         {/* Настройки отображения иконок */}
@@ -152,6 +188,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onChange
           <span>Готово</span>
         </button>
       </div>
+
+      {/* Модальное окно просмотра AndroidManifest.xml */}
+      {showManifestViewer && (
+        <div className="fixed inset-0 z-50 bg-black/90 p-4 flex items-center justify-center backdrop-blur-md">
+          <div className="ff9-window w-full max-w-lg p-5 flex flex-col gap-3 max-h-[85vh]">
+            <div className="flex items-center justify-between border-b border-slate-400 pb-2">
+              <div className="flex items-center gap-2 text-amber-300 font-bold text-xs">
+                <FileCode size={16} />
+                <span>AndroidManifest.xml (Android permissions)</span>
+              </div>
+              <button
+                onClick={() => setShowManifestViewer(false)}
+                className="p-1 rounded-lg bg-blue-950 text-slate-300 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <pre className="flex-1 overflow-auto p-3 rounded-lg bg-slate-950 text-emerald-300 font-mono text-[10px] leading-relaxed border border-slate-700 selection:bg-amber-500 selection:text-black">
+              {manifestContent}
+            </pre>
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleDownloadManifest}
+                className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl ff9-btn-gold text-slate-950 font-bold text-xs"
+              >
+                <Download size={14} />
+                <span>Скачать AndroidManifest.xml</span>
+              </button>
+              <button
+                onClick={() => setShowManifestViewer(false)}
+                className="py-2 px-4 rounded-xl ff9-btn text-xs"
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

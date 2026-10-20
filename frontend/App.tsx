@@ -6,10 +6,7 @@ import {
   chooseSaveLocationAndExport,
   syncArrayToFileHandle,
   getAttachedFileName,
-  getAttachedFolderName,
 } from './services/storageService';
-import { checkStoragePermission, openAppSettings } from './services/permissionService';
-import { STORAGE_MESSAGES } from './constants';
 import { MainMenu } from './components/MainMenu';
 import { ArrayBuilder } from './components/ArrayBuilder';
 import { CellCardModal } from './components/CellCardModal';
@@ -19,16 +16,15 @@ export const App: React.FC = () => {
   const [screen, setScreen] = useState<AppScreen>('MAIN_MENU');
   const [currentArray, setCurrentArray] = useState<BlueprintArray | null>(null);
   const [activeFileName, setActiveFileName] = useState<string | null>(getAttachedFileName());
-  const [activeFolderName, setActiveFolderName] = useState<string | null>(getAttachedFolderName());
-  
-  // Global snackbar for permission or storage feedback
-  const [globalErrorToast, setGlobalErrorToast] = useState<{ message: string; showSettings: boolean } | null>(null);
 
+  // Target coordinates for cell editor
   const [editingCellTarget, setEditingCellTarget] = useState<{ row: number; col: number } | null>(null);
 
+  // Keep ref for immediate flush on app close/minimize without closure staleness
   const currentArrayRef = useRef<BlueprintArray | null>(null);
   currentArrayRef.current = currentArray;
 
+  // Auto-sync function
   const flushCurrentArrayToFile = useCallback(() => {
     if (currentArrayRef.current) {
       saveActiveArrayToStorage(currentArrayRef.current);
@@ -36,25 +32,15 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // Initial load and permission state check on startup
+  // Load existing array from local storage on mount
   useEffect(() => {
-    checkStoragePermission().then((status) => {
-      if (status === 'denied') {
-        setGlobalErrorToast({
-          message: STORAGE_MESSAGES.ERR_PERMISSION_DENIED,
-          showSettings: true,
-        });
-      }
-    });
-
     const saved = loadActiveArrayFromStorage();
     if (saved) {
       setCurrentArray(saved);
-      setActiveFileName(getAttachedFileName());
-      setActiveFolderName(getAttachedFolderName());
     }
   }, []);
 
+  // Sync to storage & file whenever currentArray updates
   useEffect(() => {
     if (currentArray) {
       saveActiveArrayToStorage(currentArray);
@@ -62,6 +48,7 @@ export const App: React.FC = () => {
     }
   }, [currentArray]);
 
+  // Hook listeners for app minimization, backgrounding, and closing
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
@@ -69,8 +56,13 @@ export const App: React.FC = () => {
       }
     };
 
-    const handlePageHide = () => flushCurrentArrayToFile();
-    const handleBeforeUnload = () => flushCurrentArrayToFile();
+    const handlePageHide = () => {
+      flushCurrentArrayToFile();
+    };
+
+    const handleBeforeUnload = () => {
+      flushCurrentArrayToFile();
+    };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('pagehide', handlePageHide);
@@ -83,6 +75,7 @@ export const App: React.FC = () => {
     };
   }, [flushCurrentArrayToFile]);
 
+  // Handler: Start creating array directly inside the cell builder!
   const handleStartCreate = () => {
     const newArr: BlueprintArray = {
       id: `arr_${Date.now()}`,
@@ -98,18 +91,20 @@ export const App: React.FC = () => {
     setScreen('ARRAY_BUILDER');
   };
 
+  // Handler: Loaded existing or demo array
   const handleArrayLoaded = (arr: BlueprintArray) => {
     setCurrentArray(arr);
     setActiveFileName(getAttachedFileName());
-    setActiveFolderName(getAttachedFolderName());
     setScreen('VIEWER');
   };
 
+  // Handler: Open cell card editor
   const handleOpenCellEditor = (row: number, col: number) => {
     setEditingCellTarget({ row, col });
     setScreen('CELL_EDITOR');
   };
 
+  // Handler: Confirm cell card data & update dynamic array bounds
   const handleConfirmCell = (cellData: CellData) => {
     if (!currentArray) return;
     const key = `${cellData.row}_${cellData.col}`;
@@ -139,61 +134,24 @@ export const App: React.FC = () => {
     setEditingCellTarget(null);
   };
 
+  // Handler: Return to main menu with auto-save to file
   const handleReturnToMainMenu = () => {
     flushCurrentArrayToFile();
     setScreen('MAIN_MENU');
   };
 
+  // Handler: Save array to device storage with location picker
   const handleSaveArrayToFile = async () => {
     if (!currentArray) return;
-    try {
-      const res = await chooseSaveLocationAndExport(currentArray);
-      if (res.success) {
-        setActiveFileName(res.fileName);
-        setActiveFolderName(res.folderName);
-        setScreen('VIEWER');
-      } else if (res.error) {
-        setGlobalErrorToast({
-          message: res.error,
-          showSettings: true,
-        });
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : STORAGE_MESSAGES.ERR_WRITE_ACCESS;
-      setGlobalErrorToast({
-        message: msg,
-        showSettings: true,
-      });
+    const res = await chooseSaveLocationAndExport(currentArray);
+    if (res.success) {
+      setActiveFileName(res.fileName);
+      setScreen('VIEWER');
     }
   };
 
   return (
-    <main className="h-full w-full bg-slate-950 text-slate-100 flex flex-col justify-center items-center overflow-hidden relative">
-      {/* Global Storage Warning Snackbar */}
-      {globalErrorToast && (
-        <div className="absolute top-4 left-4 right-4 z-50 flex items-center justify-between p-3.5 rounded-2xl bg-rose-950/95 border-2 border-rose-500 shadow-2xl animate-in slide-in-from-top-4">
-          <div className="text-xs text-rose-200 pr-2">
-            {globalErrorToast.message}
-          </div>
-          <div className="flex items-center gap-2">
-            {globalErrorToast.showSettings && (
-              <button
-                onClick={() => openAppSettings()}
-                className="py-1.5 px-3 rounded-lg bg-rose-700 hover:bg-rose-600 text-white font-bold text-[11px] whitespace-nowrap"
-              >
-                {STORAGE_MESSAGES.BTN_OPEN_SETTINGS}
-              </button>
-            )}
-            <button
-              onClick={() => setGlobalErrorToast(null)}
-              className="p-1 rounded-lg text-rose-300 hover:text-white"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
-
+    <main className="h-full w-full bg-slate-950 text-slate-100 flex flex-col justify-center items-center overflow-hidden">
       {screen === 'MAIN_MENU' && (
         <MainMenu
           onStartCreate={handleStartCreate}
@@ -207,7 +165,6 @@ export const App: React.FC = () => {
         <ArrayBuilder
           array={currentArray}
           attachedFileName={activeFileName}
-          attachedFolderName={activeFolderName}
           onBack={handleReturnToMainMenu}
           onOpenCellEditor={handleOpenCellEditor}
           onSaveArray={handleSaveArrayToFile}

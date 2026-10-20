@@ -11,17 +11,12 @@ import {
   ZoomOut,
   Maximize2,
   X,
-  FolderLock,
-  ShieldCheck,
-  FileCheck2,
-  Smartphone,
 } from 'lucide-react';
-import { BlueprintArray } from '../types';
+import { BlueprintArray, CellData } from '../types';
 
 interface ArrayBuilderProps {
   array: BlueprintArray;
   attachedFileName?: string | null;
-  attachedFolderName?: string | null;
   onBack: () => void;
   onOpenCellEditor: (row: number, col: number) => void;
   onSaveArray: () => Promise<void> | void;
@@ -32,7 +27,6 @@ interface ArrayBuilderProps {
 export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
   array,
   attachedFileName,
-  attachedFolderName,
   onBack,
   onOpenCellEditor,
   onSaveArray,
@@ -41,7 +35,6 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
 }) => {
   const { cells } = array;
   const [isSaving, setIsSaving] = useState<boolean>(false);
-  const [showAndroidSAFModal, setShowAndroidSAFModal] = useState<boolean>(false);
 
   // Canvas viewport navigation (scale and translation)
   const [canvasScale, setCanvasScale] = useState<number>(1.0);
@@ -98,12 +91,13 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
   const isPlusSlot = useCallback(
     (r: number, c: number): boolean => {
       const key = `${r}_${c}`;
-      if (cells[key]) return false;
+      if (cells[key]) return false; // Already filled
 
       if (!hasAnyCell) {
-        return r === 0 && c === 0;
+        return r === 0 && c === 0; // First initial cell
       }
 
+      // 4 directions: top, bottom, left, right
       const hasTop = !!cells[`${r - 1}_${c}`];
       const hasBottom = !!cells[`${r + 1}_${c}`];
       const hasLeft = !!cells[`${r}_${c - 1}`];
@@ -114,6 +108,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
     [cells, hasAnyCell]
   );
 
+  // Center canvas on first load
   useEffect(() => {
     setCanvasOffset({ x: 0, y: 0 });
     setCanvasScale(1.0);
@@ -146,6 +141,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
 
     const currentTouches = Array.from(e.touches).map((t) => ({ x: t.clientX, y: t.clientY }));
 
+    // Two-finger pinch to zoom & two-finger pan
     if (e.touches.length >= 2 && state.initialDist > 0) {
       state.hasMoved = true;
       const t0 = currentTouches[0];
@@ -155,6 +151,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
       const scaleRatio = dist / state.initialDist;
       const newScale = Math.max(0.35, Math.min(3.5, state.initialScale * scaleRatio));
 
+      // Pan offset
       const midX = (t0.x + t1.x) / 2;
       const midY = (t0.y + t1.y) / 2;
       const initMidX = (state.startTouches[0].x + state.startTouches[1].x) / 2;
@@ -166,6 +163,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
         y: state.initialOffset.y + (midY - initMidY),
       });
     } else if (e.touches.length === 1 && !swapSourceKey) {
+      // Single finger drag to pan canvas across wide layouts
       const dx = currentTouches[0].x - state.startTouches[0].x;
       const dy = currentTouches[0].y - state.startTouches[0].y;
       if (Math.hypot(dx, dy) > 8) {
@@ -182,6 +180,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
     touchStateRef.current = null;
   };
 
+  // Wheel zoom for desktop / trackpad
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.15 : 0.85;
@@ -190,6 +189,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
 
   /* ----------------- CELL TAP / DOUBLE TAP / LONG PRESS ----------------- */
   const handleItemTouchStart = (key: string) => {
+    // Start long-press timer for moving/swapping cells
     if (cells[key]) {
       longPressTimerRef.current = window.setTimeout(() => {
         if ('vibrate' in navigator) {
@@ -206,18 +206,23 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
       longPressTimerRef.current = null;
     }
 
+    // If swap mode is currently active:
     if (swapSourceKey) {
       if (swapSourceKey === key) {
+        // Tapped same cell -> cancel swap
         setSwapSourceKey(null);
         return;
       }
+      // Swap contents of swapSourceKey and (r, c)
       handleSwapCells(swapSourceKey, r, c);
       setSwapSourceKey(null);
       return;
     }
 
+    // Double tap detector
     const now = Date.now();
     if (lastTapRef.current?.id === key && now - lastTapRef.current.time < 380) {
+      // DOUBLE TAP CONFIRMED -> Open create / edit
       onOpenCellEditor(r, c);
       lastTapRef.current = null;
     } else {
@@ -225,6 +230,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
     }
   };
 
+  /* ----------------- SWAP / MOVE CELLS LOGIC ----------------- */
   const handleSwapCells = (sourceKey: string, destR: number, destC: number) => {
     const destKey = `${destR}_${destC}`;
     const sourceCell = cells[sourceKey];
@@ -234,6 +240,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
     const newCells = { ...cells };
 
     if (destCell) {
+      // Both cells exist -> swap payloads with updated row/col
       newCells[sourceKey] = {
         ...destCell,
         row: sourceCell.row,
@@ -245,6 +252,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
         col: destC,
       };
     } else {
+      // Destination is empty -> move source cell to dest
       delete newCells[sourceKey];
       newCells[destKey] = {
         ...sourceCell,
@@ -253,6 +261,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
       };
     }
 
+    // Recalculate dimensions
     const keys = Object.keys(newCells);
     let r0 = 0, r1 = 0, c0 = 0, c1 = 0;
     if (keys.length > 0) {
@@ -270,8 +279,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
     });
   };
 
-  const handleConfirmSAFExecution = async () => {
-    setShowAndroidSAFModal(false);
+  const handleSaveClick = async () => {
     try {
       setIsSaving(true);
       await onSaveArray();
@@ -280,6 +288,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
     }
   };
 
+  // Dimensions of grid items in pixels
   const itemW = 105;
   const itemH = 135;
   const gap = 16;
@@ -336,13 +345,11 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
           </div>
         )}
 
-        {(attachedFolderName || attachedFileName) && (
-          <div className="px-3 py-1.5 rounded-xl bg-slate-900/90 border border-emerald-500/30 flex items-center gap-2 text-xs text-slate-300 shadow">
+        {attachedFileName && (
+          <div className="px-3 py-1.5 rounded-xl bg-slate-900/90 border border-emerald-500/30 flex items-center gap-2 text-xs text-slate-300">
             <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
-            <span className="text-slate-400">SAF Папка:</span>
-            <span className="font-semibold text-emerald-300 truncate">
-              {attachedFolderName || 'Хранилище'} / {attachedFileName || 'config.json'}
-            </span>
+            <span className="text-slate-400">Файл массива:</span>
+            <span className="font-semibold text-emerald-300 truncate">{attachedFileName}</span>
           </div>
         )}
       </div>
@@ -356,6 +363,7 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
         onTouchEnd={handleTouchEnd}
         onWheel={handleWheel}
       >
+        {/* Subtle grid pattern background */}
         <div
           className="absolute inset-0 opacity-15 pointer-events-none"
           style={{
@@ -506,69 +514,16 @@ export const ArrayBuilder: React.FC<ArrayBuilderProps> = ({
         </div>
       </div>
 
-      {/* Android Storage Access Framework (SAF) Permission Modal */}
-      {showAndroidSAFModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-amber-500/50 rounded-3xl p-6 max-w-sm w-full flex flex-col gap-4 shadow-2xl animate-in fade-in zoom-in-95">
-            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
-              <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-400">
-                <Smartphone size={26} />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-slate-100">Android Storage Access Framework</h3>
-                <p className="text-[11px] text-amber-400/90">Выбор папки через системный SAF</p>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2.5 text-xs text-slate-300 leading-relaxed">
-              <div className="flex items-start gap-2">
-                <ShieldCheck size={18} className="text-emerald-400 shrink-0 mt-0.5" />
-                <span>
-                  Приложение запросит доступ через системный проводник Android к целевой папке на устройстве (или карте памяти).
-                </span>
-              </div>
-              <div className="flex items-start gap-2">
-                <FileCheck2 size={18} className="text-cyan-400 shrink-0 mt-0.5" />
-                <span>
-                  В выбранную папку будут сохранены файл <b>_config.json</b> и сканы чертежей в высоком разрешении для полной работы без интернета.
-                </span>
-              </div>
-              <div className="flex items-start gap-2">
-                <FolderLock size={18} className="text-amber-400 shrink-0 mt-0.5" />
-                <span>
-                  Все правки чертежей и комментариев будут автоматически сохраняться в эту папку при сворачивании и выходе из приложения.
-                </span>
-              </div>
-            </div>
-
-            <div className="flex gap-2.5 pt-2">
-              <button
-                onClick={() => setShowAndroidSAFModal(false)}
-                className="flex-1 py-3 px-4 rounded-xl bg-slate-800 text-slate-300 font-semibold text-xs hover:bg-slate-700 transition"
-              >
-                Отмена
-              </button>
-              <button
-                onClick={handleConfirmSAFExecution}
-                className="flex-1 py-3 px-4 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 shadow-lg transition"
-              >
-                Открыть проводник SAF
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Bottom Actions */}
       <div className="p-4 bg-slate-900/90 border-t border-slate-800 flex flex-col gap-2 backdrop-blur-md z-20">
         <div className="flex gap-3">
           <button
-            onClick={() => setShowAndroidSAFModal(true)}
+            onClick={handleSaveClick}
             disabled={isSaving}
             className="flex-1 flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-100 font-bold text-sm border border-slate-700 disabled:opacity-50 transition"
           >
             <HardDrive size={18} className="text-amber-400" />
-            <span>{isSaving ? 'Выбор папки в SAF...' : 'Сохранить массив'}</span>
+            <span>{isSaving ? 'Выбор места...' : 'Сохранить массив'}</span>
           </button>
 
           {hasAnyCell && (

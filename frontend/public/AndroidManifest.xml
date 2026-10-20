@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="ru.kotlovan.blueprints">
+
+    <!-- ================================================================= -->
+    <!-- РАЗРЕШЕНИЯ ДЛЯ РАБОТЫ С ФАЙЛОВОЙ СИСТЕМОЙ И ХРАНИЛИЩЕМ ANDROID   -->
+    <!-- ================================================================= -->
+
+    <!-- 1. Android 4.4 – 9.0 (API <= 29): Классическая запись во внешнюю память -->
+    <uses-permission 
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE" 
+        android:maxSdkVersion="29" 
+        tools:ignore="ScopedStorage" />
+
+    <!-- 2. Android 4.4 – 12L (API <= 32): Чтение чертежей и сканов из памяти устройства -->
+    <uses-permission 
+        android:name="android.permission.READ_EXTERNAL_STORAGE" 
+        android:maxSdkVersion="32" />
+
+    <!-- 3. Android 13+ (API 33+): Гранулярный доступ к изображениям и сканам чертежей -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+
+    <!-- 4. Android 14+ (API 34+): Частичный доступ к выбранным пользователем файлам -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+
+    <!-- ================================================================= -->
+    <!-- ОПЦИОНАЛЬНОЕ РАЗРЕШЕНИЕ: ПОЛНЫЙ ДОСТУП КО ВСЕМ ФАЙЛАМ (ВАРИАНТ C) -->
+    <!-- ВНИМАНИЕ: Google Play отклоняет приложения с MANAGE_EXTERNAL_STORAGE, -->
+    <!-- если они не являются файловыми менеджерами или антивирусами.     -->
+    <!-- Для публикации в Google Play рекомендуется использовать SAF (Вариант B). -->
+    <!-- Раскомментируйте строку ниже только для корпоративной APK установки: -->
+    <!-- <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" /> -->
+
+    <!-- ================================================================= -->
+    <!-- АППАРАТНЫЕ РАЗРЕШЕНИЯ ДЛЯ ФОНАРИКА (ПОДСВЕТКА ЧЕРТЕЖЕЙ)           -->
+    <!-- ================================================================= -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Котлован"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme"
+        android:hardwareAccelerated="true"
+        android:largeHeap="true"
+        android:requestLegacyExternalStorage="true"
+        tools:targetApi="34">
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:name=".MainActivity"
+            android:label="Котлован"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Интеграция Storage Access Framework (SAF) для открытия файлов .json -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/json" />
+            </intent-filter>
+        </activity>
+
+        <!-- Провайдер для безопасного обмена файлами чертежей и сканов -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

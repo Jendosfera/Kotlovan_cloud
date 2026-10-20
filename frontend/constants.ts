@@ -40,6 +40,88 @@ export const STORAGE_MESSAGES = {
   FOLDER_NOT_SET: 'Папка не выбрана',
 };
 
+// ==========================================
+// ЗВУКОВОЙ ДВИЖОК FINAL FANTASY (Web Audio API)
+// ==========================================
+let audioCtxInstance: AudioContext | null = null;
+const getAudioContext = (): AudioContext | null => {
+  if (!audioCtxInstance && typeof window !== 'undefined') {
+    const AudioCtxClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (AudioCtxClass) {
+      audioCtxInstance = new AudioCtxClass();
+    }
+  }
+  if (audioCtxInstance && audioCtxInstance.state === 'suspended') {
+    audioCtxInstance.resume().catch(() => {});
+  }
+  return audioCtxInstance;
+};
+
+export const sound = {
+  isMuted: false,
+
+  playCursor: (): void => {
+    if (sound.isMuted) return;
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(680, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(840, ctx.currentTime + 0.045);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.045);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.045);
+    } catch {}
+  },
+
+  playConfirm: (): void => {
+    if (sound.isMuted) return;
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const freqs = [523.25, 659.25, 783.99, 1046.5];
+      freqs.forEach((freq, idx) => {
+        if (!ctx) return;
+        const startTime = ctx.currentTime + idx * 0.045;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, startTime);
+        gain.gain.setValueAtTime(0.18, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.16);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(startTime);
+        osc.stop(startTime + 0.16);
+      });
+    } catch {}
+  },
+
+  playCancel: (): void => {
+    if (sound.isMuted) return;
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, ctx.currentTime);
+      osc.frequency.linearRampToValueAtTime(140, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.14, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.08);
+    } catch {}
+  },
+};
+
 // Procedurally generate clean architectural & MEP SVG data URLs for instant offline demo
 export const generateDemoBlueprint = (
   type: 'ARCH' | 'HVAC' | 'ELEC' | 'PLUMB',
@@ -57,6 +139,7 @@ export const generateDemoBlueprint = (
       <rect x="100" y="100" width="1000" height="600" fill="none" stroke="#64748b" stroke-width="6"/>
       <line x1="500" y1="100" x2="500" y2="700" stroke="#64748b" stroke-width="4"/>
       <line x1="100" y1="400" x2="1100" y2="400" stroke="#64748b" stroke-width="4"/>
+      <!-- Doors & Windows -->
       <path d="M 450,100 A 50,50 0 0,1 500,150" fill="none" stroke="#38bdf8" stroke-width="3" stroke-dasharray="4,4"/>
       <path d="M 1050,400 A 50,50 0 0,1 1100,450" fill="none" stroke="#38bdf8" stroke-width="3" stroke-dasharray="4,4"/>
       <rect x="250" y="94" width="120" height="12" fill="#0284c7"/>
@@ -72,6 +155,7 @@ export const generateDemoBlueprint = (
       <rect x="100" y="100" width="1000" height="600" fill="none" stroke="#334155" stroke-width="4"/>
       <line x1="500" y1="100" x2="500" y2="700" stroke="#334155" stroke-width="2"/>
       <line x1="100" y1="400" x2="1100" y2="400" stroke="#334155" stroke-width="2"/>
+      <!-- Air Ducts -->
       <rect x="180" y="220" width="80" height="60" fill="#0891b2" opacity="0.3"/>
       <path d="M 220,100 L 220,250 L 450,250 L 450,450 L 800,450" fill="none" stroke="#06b6d4" stroke-width="12" stroke-linecap="round"/>
       <path d="M 750,150 L 750,300 L 950,300" fill="none" stroke="#38bdf8" stroke-width="10" stroke-linecap="round" stroke-dasharray="10,5"/>
@@ -87,6 +171,7 @@ export const generateDemoBlueprint = (
       <rect x="100" y="100" width="1000" height="600" fill="none" stroke="#334155" stroke-width="4"/>
       <line x1="500" y1="100" x2="500" y2="700" stroke="#334155" stroke-width="2"/>
       <line x1="100" y1="400" x2="1100" y2="400" stroke="#334155" stroke-width="2"/>
+      <!-- Electrical Trays and Panels -->
       <rect x="120" y="420" width="40" height="70" fill="#f59e0b" stroke="#fbbf24" stroke-width="3"/>
       <text x="170" y="455" font-size="16" fill="#fbbf24" font-family="sans-serif">ЩР-1 (ВРУ)</text>
       <path d="M 140,420 L 140,280 L 350,280 L 350,200 L 850,200 L 850,550" fill="none" stroke="#eab308" stroke-width="6" stroke-dasharray="8,6"/>
@@ -101,6 +186,7 @@ export const generateDemoBlueprint = (
       <rect x="100" y="100" width="1000" height="600" fill="none" stroke="#334155" stroke-width="4"/>
       <line x1="500" y1="100" x2="500" y2="700" stroke="#334155" stroke-width="2"/>
       <line x1="100" y1="400" x2="1100" y2="400" stroke="#334155" stroke-width="2"/>
+      <!-- Water and Heating Pipes -->
       <path d="M 100,500 L 400,500 L 400,200 L 980,200" fill="none" stroke="#3b82f6" stroke-width="8"/>
       <path d="M 100,520 L 420,520 L 420,220 L 980,220" fill="none" stroke="#ef4444" stroke-width="8"/>
       <circle cx="400" cy="500" r="10" fill="#60a5fa"/>
@@ -118,12 +204,16 @@ export const generateDemoBlueprint = (
     </defs>
     <rect width="${width}" height="${height}" fill="#0f172a"/>
     <rect width="${width}" height="${height}" fill="url(#grid)" />
+    <!-- Outer Blueprint Border -->
     <rect x="20" y="20" width="${width - 40}" height="${height - 40}" fill="none" stroke="#334155" stroke-width="2"/>
+    <!-- Stamp -->
     <rect x="${width - 320}" y="${height - 110}" width="300" height="90" fill="#1e293b" stroke="#475569" stroke-width="2"/>
     <text x="${width - 305}" y="${height - 75}" font-size="18" fill="#f8fafc" font-family="sans-serif" font-weight="bold">${title}</text>
     <text x="${width - 305}" y="${height - 45}" font-size="13" fill="#94a3b8" font-family="sans-serif">ОБЪЕКТ: «КОТЛОВАН-ИНЖЕНЕРИЯ»</text>
     <text x="${width - 305}" y="${height - 25}" font-size="11" fill="#64748b" font-family="sans-serif">М 1:100 • ЛИСТ Р-1</text>
+    <!-- Architectural / Engineering Geometry -->
     ${linesContent}
+    <!-- Center reference anchor symbol -->
     <circle cx="500" cy="400" r="6" fill="${accentColor}" />
     <circle cx="500" cy="400" r="18" fill="none" stroke="${accentColor}" stroke-width="1.5" stroke-dasharray="3,3"/>
   </svg>`;

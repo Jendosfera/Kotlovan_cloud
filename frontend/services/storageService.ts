@@ -1,83 +1,156 @@
-import { BlueprintArray, CellData } from '../types';
-
-import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
-
-const CONFIG_FOLDER = 'configs';
-
-function safeFileName(name: string): string {
-  const cleaned = name
-    .replace(/\.json$/i, '')
-    .replace(/[^a-zA-Z0-9а-яА-Я_-]/g, '_');
-
-  return `${cleaned || 'config'}.json`;
-}
-
-/** Сохраняет конфигурацию во внутреннем хранилище приложения. */
-export async function saveConfig(
-  name: string,
-  config: unknown,
-): Promise<string> {
-  const fileName = safeFileName(name);
-
-  const result = await Filesystem.writeFile({
-    path: `CONFIGFOLDER/{CONFIG_FOLDER}/CONFIGF​OLDER/{fileName}`,
-    data: JSON.stringify(config, null, 2),
-    directory: Directory.Data,
-    encoding: Encoding.UTF8,
-    recursive: true,
-  });
-
-  return result.uri;
-}
-
-/** Разбирает выбранный JSON-файл. */
-export async function loadConfigFile(file: File): Promise<unknown> {
-  const text = await file.text();
-  return JSON.parse(text);
-}
-
-/** Сохраняет и отправляет конфигурацию через системное меню Android. */
-export async function exportConfig(
-  name: string,
-  config: unknown,
-): Promise<void> {
-  const uri = await saveConfig(name, config);
-
-  await Share.share({
-    title: 'Экспорт конфигурации',
-    text: `Конфигурация ${safeFileName(name)}`,
-    files: [uri],
-    dialogTitle: 'Сохранить или отправить конфигурацию',
-  });
-}
-
+import { BlueprintArray } from '../types';
+import { STORAGE_MESSAGES } from '../constants';
 
 const STORAGE_KEY = 'kotlovan_active_array_v1';
 const ATTACHED_FOLDER_NAME_KEY = 'kotlovan_saf_folder_name_v1';
-const ATTACHED_FOLDER_URI_KEY = 'kotlovan_saf_folder_uri_v1';
-const ATTACHED_FILE_NAME_KEY = 'kotlovan_saf_filename_v1';
+const ATTACHED_FILE_NAME_KEY = 'kotlovan_attached_filename_v1';
 
-// Global reference for Android SAF folder tree handle and file handle
-let activeDirectoryHandle: FileSystemDirectoryHandle | null = null;
+// In-memory reference to user-selected file / directory handle
 let activeFileHandle: FileSystemFileHandle | null = null;
+let activeDirectoryHandle: FileSystemDirectoryHandle | null = null;
 
-// Definition for optional Android WebView native SAF bridge
-declare global {
-  interface Window {
-    AndroidSAF?: {
-      openDocumentTree?: () => void;
-      saveFile?: (fileName: string, mimeType: string, base64Data: string) => string;
-      createDocument?: (suggestedName: string, mimeType: string, content: string) => string;
-      hasStoragePermission?: () => boolean;
-      requestStoragePermission?: () => void;
-    };
-    AndroidBridge?: {
-      saveArrayPackage?: (jsonConfig: string, imagesJson: string) => boolean;
-    };
+// ==========================================
+// ПРОВЕРКА И ЗАПРОС РАЗРЕШЕНИЙ ХРАНИЛИЩА
+// ==========================================
+export type StoragePermissionState =
+  | 'granted'
+  | 'denied'
+  | 'prompt'
+  | 'limited'
+  | 'unsupported';
+
+export class StoragePermissionError extends Error {
+  public code: string;
+  public permanentlyDenied: boolean;
+
+  constructor(message: string, code: string = 'PERMISSION_DENIED', permanentlyDenied: boolean = false) {
+    super(message);
+    this.name = 'StoragePermissionError';
+    this.code = code;
+    this.permanentlyDenied = permanentlyDenied;
   }
 }
 
+let cachedPermissionState: StoragePermissionState | null = null;
+let deniedCount = 0;
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('focus', () => {
+    cachedPermissionState = null;
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      cachedPermissionState = null;
+    }
+  });
+}
+
+export const checkStoragePermission = async (): Promise<StoragePermissionState> => {
+  if (cachedPermissionState) {
+    return cachedPermissionState;
+  }
+
+  const cap = (window as unknown as { Capacitor?: { Plugins?: { Filesystem?: { checkPermissions?: () => Promise<{ publicStorage?: string }> } } } }).Capacitor;
+  if (cap?.Plugins?.Filesystem?.checkPermissions) {
+    try {
+      const res = await cap.Plugins.Filesystem.checkPermissions();
+      const status = res.publicStorage;
+      if (status === 'granted') {
+        cachedPermissionState = 'granted';
+        return 'granted';
+      }
+      if (status === 'denied') {
+        cachedPermissionState = 'denied';
+        return 'denied';
+      }
+      cachedPermissionState = 'prompt';
+      return 'prompt';
+    } catch (err) {
+      console.warn('Capacitor checkPermissions error:', err);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    if ('showDirectoryPicker' in window || 'showSaveFilePicker' in window) {
+      cachedPermissionState = 'granted';
+      return 'granted';
+    }
+    cachedPermissionState = 'granted';
+    return 'granted';
+  }
+
+  cachedPermissionState = 'unsupported';
+  return 'unsupported';
+};
+
+export const requestStoragePermission = async (): Promise<StoragePermissionState> => {
+  const current = await checkStoragePermission();
+  if (current === 'granted') {
+    return 'granted';
+  }
+
+  if (await isPermanentlyDenied()) {
+    return 'denied';
+  }
+
+  const cap = (window as unknown as { Capacitor?: { Plugins?: { Filesystem?: { requestPermissions?: () => Promise<{ publicStorage?: string }> } } } }).Capacitor;
+  if (cap?.Plugins?.Filesystem?.requestPermissions) {
+    try {
+      const res = await cap.Plugins.Filesystem.requestPermissions();
+      const status = res.publicStorage === 'granted' ? 'granted' : 'denied';
+      cachedPermissionState = status;
+      if (status === 'denied') {
+        deniedCount++;
+      }
+      return status;
+    } catch (err) {
+      console.warn('Capacitor requestPermissions error:', err);
+      deniedCount++;
+      cachedPermissionState = 'denied';
+      return 'denied';
+    }
+  }
+
+  cachedPermissionState = 'granted';
+  return 'granted';
+};
+
+export const isPermanentlyDenied = async (): Promise<boolean> => {
+  return deniedCount >= 2;
+};
+
+export const openAppSettings = async (): Promise<void> => {
+  const cap = (window as unknown as { Capacitor?: { Plugins?: { App?: { openUrl?: (opts: { url: string }) => Promise<void> } } } }).Capacitor;
+  if (cap?.Plugins?.App?.openUrl) {
+    try {
+      await cap.Plugins.App.openUrl({ url: 'app-settings:' });
+      return;
+    } catch {}
+  }
+
+  alert(STORAGE_MESSAGES.ERR_PERMANENTLY_DENIED);
+};
+
+export const ensureStorageAccess = async (): Promise<void> => {
+  const status = await checkStoragePermission();
+  if (status === 'granted') {
+    return;
+  }
+
+  const requested = await requestStoragePermission();
+  if (requested !== 'granted') {
+    const permDenied = await isPermanentlyDenied();
+    throw new StoragePermissionError(
+      permDenied ? STORAGE_MESSAGES.ERR_PERMANENTLY_DENIED : STORAGE_MESSAGES.ERR_PERMISSION_DENIED,
+      'PERMISSION_DENIED',
+      permDenied
+    );
+  }
+};
+
+// ==========================================
+// РАБОТА С ФАЙЛАМИ И ПАПКАМИ
+// ==========================================
 export const getAttachedFolderName = (): string | null => {
   try {
     return localStorage.getItem(ATTACHED_FOLDER_NAME_KEY);
@@ -94,103 +167,53 @@ export const getAttachedFileName = (): string | null => {
   }
 };
 
-export const setAttachedStorageInfo = (
-  folderName: string | null,
-  fileName: string | null,
-  safUri?: string | null
-): void => {
+export const setAttachedFileName = (name: string | null): void => {
   try {
-    if (folderName) {
-      localStorage.setItem(ATTACHED_FOLDER_NAME_KEY, folderName);
-    } else {
-      localStorage.removeItem(ATTACHED_FOLDER_NAME_KEY);
-    }
-    if (fileName) {
-      localStorage.setItem(ATTACHED_FILE_NAME_KEY, fileName);
+    if (name) {
+      localStorage.setItem(ATTACHED_FILE_NAME_KEY, name);
     } else {
       localStorage.removeItem(ATTACHED_FILE_NAME_KEY);
     }
-    if (safUri) {
-      localStorage.setItem(ATTACHED_FOLDER_URI_KEY, safUri);
-    }
-  } catch {
-    // Ignore storage quota warnings
-  }
+  } catch {}
 };
 
-/**
- * Создание конфигурационного объекта массива в точном соответствии с ТЗ:
- * информация о массиве (строки, столбцы),
- * информация о каждой ячейке (адрес в массиве, название файла изображения и относительный путь к нему,
- * название карточки, координаты и размер комментариев с текстом, Свое положение, Общая точка).
- */
-export const buildArrayExportPackage = (array: BlueprintArray) => {
-  const safeName = array.name.replace(/[^a-zA-Zа-яА-Я0-9_-]/g, '_') || 'massiv_kotlovan';
-  const cellsMap: { [key: string]: unknown } = {};
+export const setAttachedStorageInfo = (folderName: string | null, fileName: string | null): void => {
+  try {
+    if (folderName) localStorage.setItem(ATTACHED_FOLDER_NAME_KEY, folderName);
+    else localStorage.removeItem(ATTACHED_FOLDER_NAME_KEY);
 
-  Object.entries(array.cells).forEach(([key, cell]) => {
-    const ext = cell.imageDataUrl.includes('image/svg')
-      ? 'svg'
-      : cell.imageDataUrl.includes('image/jpeg')
-      ? 'jpg'
-      : 'png';
-    const relativeImageFile = `plans/${cell.imageFileName || `cell_${cell.row + 1}_${cell.col + 1}.${ext}`}`;
+    if (fileName) localStorage.setItem(ATTACHED_FILE_NAME_KEY, fileName);
+    else localStorage.removeItem(ATTACHED_FILE_NAME_KEY);
+  } catch {}
+};
 
-    cellsMap[key] = {
-      address: { row: cell.row, col: cell.col },
-      cellCardTitle: cell.title,
-      imageFileName: cell.imageFileName || `cell_${cell.row + 1}_${cell.col + 1}.${ext}`,
-      imageRelativePath: relativeImageFile,
-      customPosition: cell.customPosition || false,
-      commonPoint: cell.commonPoint || {
-        x: Math.round((cell.imageWidth || 1200) / 2),
-        y: Math.round((cell.imageHeight || 800) / 2),
-      },
-      comments: cell.comments.map((comm) => ({
-        id: comm.id,
-        x: comm.x,
-        y: comm.y,
-        radius: comm.radius,
-        title: comm.title,
-        text: comm.text,
-        createdAt: comm.createdAt,
-      })),
-      viewport: cell.viewport,
-      imageWidth: cell.imageWidth,
-      imageHeight: cell.imageHeight,
-    };
-  });
-
-  return {
+export const serializeArrayConfig = (array: BlueprintArray): string => {
+  const exportPayload = {
     app: 'Котлован',
-    version: '1.2.0',
-    storageFramework: 'Android Storage Access Framework (SAF)',
-    savedAt: new Date().toISOString(),
+    version: '1.4.0',
+    storageFramework: 'Storage Access Framework (SAF) / Filesystem API',
+    updatedAt: new Date().toISOString(),
     array: {
       id: array.id,
       name: array.name,
       rows: array.rows,
       cols: array.cols,
       createdAt: array.createdAt,
-      updatedAt: Date.now(),
       lastViewedCell: array.lastViewedCell,
       globalScale: array.globalScale,
       globalOffsetX: array.globalOffsetX,
       globalOffsetY: array.globalOffsetY,
-      cells: cellsMap,
+      cells: array.cells,
     },
   };
-};
-
-export const serializeArrayConfig = (array: BlueprintArray): string => {
-  return JSON.stringify(buildArrayExportPackage(array), null, 2);
+  return JSON.stringify(exportPayload, null, 2);
 };
 
 export const saveActiveArrayToStorage = (array: BlueprintArray): void => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(array));
   } catch (err) {
-    console.warn('Storage quota exceeded for active array data', err);
+    console.warn('Storage quota exceeded for active array full data', err);
   }
 };
 
@@ -200,54 +223,28 @@ export const loadActiveArrayFromStorage = (): BlueprintArray | null => {
     if (!raw) return null;
     return JSON.parse(raw) as BlueprintArray;
   } catch (err) {
-    console.error('Failed to parse active array from local storage', err);
+    console.error('Failed to parse active array', err);
     return null;
   }
 };
 
-export const dataUrlToBlob = (dataUrl: string): Blob => {
-  const parts = dataUrl.split(',');
-  const mimeMatch = parts[0].match(/:(.*?);/);
-  const mime = mimeMatch ? mimeMatch[1] : 'image/png';
-
-  if (parts[0].includes('base64')) {
-    const bstr = atob(parts[1]);
-    let n = bstr.length;
-    const u8arr = new Uint8Array(n);
-    while (n--) {
-      u8arr[n] = bstr.charCodeAt(n);
-    }
-    return new Blob([u8arr], { type: mime });
-  } else {
-    const text = decodeURIComponent(parts[1]);
-    return new Blob([text], { type: mime });
-  }
-};
-
-/**
- * Автоматическая синхронизация при выходе, сворачивании приложения и возврате в меню.
- * Вызывается без участия пользователя, перезаписывая файл конфигурации в выделенном дереве SAF.
- */
 export const syncArrayToFileHandle = async (array: BlueprintArray): Promise<boolean> => {
   saveActiveArrayToStorage(array);
 
-  // 1. Запись через активный SAF Directory Handle (ACTION_OPEN_DOCUMENT_TREE)
   if (activeDirectoryHandle) {
     try {
       const safeName = array.name.replace(/[^a-zA-Zа-яА-Я0-9_-]/g, '_') || 'massiv_kotlovan';
       const configFileName = `${safeName}_config.json`;
-
       const fileHandle = await activeDirectoryHandle.getFileHandle(configFileName, { create: true });
       const writable = await fileHandle.createWritable();
       await writable.write(serializeArrayConfig(array));
       await writable.close();
       return true;
     } catch (err) {
-      console.warn('SAF folder autosync failed:', err);
+      console.warn('Direct sync to folder handle failed:', err);
     }
   }
 
-  // 2. Запись через активный SAF File Handle (ACTION_CREATE_DOCUMENT)
   if (activeFileHandle) {
     try {
       const jsonStr = serializeArrayConfig(array);
@@ -256,64 +253,21 @@ export const syncArrayToFileHandle = async (array: BlueprintArray): Promise<bool
       await writable.close();
       return true;
     } catch (err) {
-      console.warn('SAF file autosync failed:', err);
-    }
-  }
-
-  // 3. Запись через нативный Android SAF WebView Bridge, если скомпилировано в APK
-  if (typeof window !== 'undefined' && window.AndroidBridge?.saveArrayPackage) {
-    try {
-      const jsonStr = serializeArrayConfig(array);
-      return window.AndroidBridge.saveArrayPackage(jsonStr, '{}');
-    } catch (err) {
-      console.warn('AndroidBridge.saveArrayPackage failed:', err);
+      console.warn('Could not write directly to attached file handle:', err);
     }
   }
 
   return false;
 };
 
-export interface SAFSaveResult {
-  success: boolean;
-  folderName?: string;
-  fileName: string;
-  safMode: 'SAF_DIRECTORY_TREE' | 'SAF_SINGLE_DOCUMENT' | 'SAF_WEBVIEW_BRIDGE' | 'STANDARD_STORAGE';
-  error?: string;
-}
-
-/**
- * Основная функция сохранения массива через Storage Access Framework (SAF) на Android.
- * Создает папку с файлом конфигурации и файлами чертежей с запросом прав доступа readwrite.
- */
 export const chooseSaveLocationAndExport = async (
   array: BlueprintArray
-): Promise<SAFSaveResult> => {
+): Promise<{ success: boolean; folderName: string; fileName: string; error?: string }> => {
+  await ensureStorageAccess();
+
   const safeName = array.name.replace(/[^a-zA-Zа-яА-Я0-9_-]/g, '_') || 'massiv_kotlovan';
-  const configFileName = `${safeName}_config.json`;
+  const defaultFileName = `${safeName}_config.json`;
 
-  // --- ВАРИАНТ 1: Нативный мост Android SAF в APK WebView ---
-  if (typeof window !== 'undefined' && window.AndroidSAF) {
-    try {
-      const jsonStr = serializeArrayConfig(array);
-      const resultUri = window.AndroidSAF.createDocument?.(configFileName, 'application/json', jsonStr);
-      if (resultUri) {
-        setAttachedStorageInfo('SAF Android Папка', configFileName, resultUri);
-        saveActiveArrayToStorage(array);
-        return {
-          success: true,
-          folderName: 'SAF Android Папка',
-          fileName: configFileName,
-          safMode: 'SAF_WEBVIEW_BRIDGE',
-        };
-      }
-    } catch (bridgeErr) {
-      console.warn('Native AndroidSAF bridge failed:', bridgeErr);
-    }
-  }
-
-  // --- ВАРИАНТ 2: Android SAF Document Tree Picker (showDirectoryPicker) ---
-  // На Android Chrome/Edge/WebView этот API напрямую вызывает системный Activity:
-  // Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), запрашивая Uri с флагом FLAG_GRANT_PERSISTABLE_URI_PERMISSION.
   if (typeof window !== 'undefined' && 'showDirectoryPicker' in window) {
     try {
       const dirHandle = await (window as unknown as {
@@ -323,85 +277,48 @@ export const chooseSaveLocationAndExport = async (
         startIn: 'documents',
       });
 
-      // Явный запрос разрешений Storage Access Framework
       if (dirHandle.requestPermission) {
-        const permissionStatus = await (dirHandle as unknown as {
+        const perm = await (dirHandle as unknown as {
           requestPermission: (opts: { mode: string }) => Promise<string>;
         }).requestPermission({ mode: 'readwrite' });
-
-        if (permissionStatus !== 'granted') {
+        if (perm !== 'granted') {
           return {
             success: false,
+            folderName: '',
             fileName: '',
-            safMode: 'SAF_DIRECTORY_TREE',
-            error: 'Разрешение Android Storage Access Framework (SAF) отклонено пользователем.',
+            error: STORAGE_MESSAGES.ERR_PERMISSION_DENIED,
           };
         }
       }
 
       activeDirectoryHandle = dirHandle;
-      const folderName = dirHandle.name || 'Выбранная папка (SAF)';
+      const folderName = dirHandle.name || 'Папка чертежей';
 
-      // 1. Создаем/перезаписываем текстовый файл конфигурации массива
-      const configFileHandle = await dirHandle.getFileHandle(configFileName, { create: true });
-      const configWritable = await configFileHandle.createWritable();
-      await configWritable.write(serializeArrayConfig(array));
-      await configWritable.close();
+      const configFile = await dirHandle.getFileHandle(defaultFileName, { create: true });
+      const configWriter = await configFile.createWritable();
+      await configWriter.write(serializeArrayConfig(array));
+      await configWriter.close();
 
-      // 2. Создаем подпапку "plans" для изоляции файлов изображений
-      let plansDirHandle: FileSystemDirectoryHandle = dirHandle;
-      try {
-        plansDirHandle = await dirHandle.getDirectoryHandle('plans', { create: true });
-      } catch {
-        plansDirHandle = dirHandle;
-      }
-
-      // 3. Записываем каждое изображение как отдельный файл в папку чертежей
-      const cellEntries = Object.values(array.cells);
-      for (const cell of cellEntries) {
-        if (cell.imageDataUrl) {
-          try {
-            const ext = cell.imageDataUrl.includes('image/svg')
-              ? 'svg'
-              : cell.imageDataUrl.includes('image/jpeg')
-              ? 'jpg'
-              : 'png';
-            const imgFileName = cell.imageFileName || `cell_${cell.row + 1}_${cell.col + 1}.${ext}`;
-            const imgFileHandle = await plansDirHandle.getFileHandle(imgFileName, { create: true });
-            const imgWritable = await imgFileHandle.createWritable();
-            const blob = dataUrlToBlob(cell.imageDataUrl);
-            await imgWritable.write(blob);
-            await imgWritable.close();
-          } catch (imgErr) {
-            console.warn(`Не удалось сохранить скан ${cell.title}:`, imgErr);
-          }
-        }
-      }
-
-      setAttachedStorageInfo(folderName, configFileName);
+      setAttachedStorageInfo(folderName, defaultFileName);
       saveActiveArrayToStorage(array);
 
       return {
         success: true,
         folderName,
-        fileName: configFileName,
-        safMode: 'SAF_DIRECTORY_TREE',
+        fileName: defaultFileName,
       };
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
-        // Пользователь нажал "Отмена" в системном SAF-диалоге
-        return { success: false, fileName: '', safMode: 'SAF_DIRECTORY_TREE' };
+        return { success: false, folderName: '', fileName: '' };
       }
-      console.warn('showDirectoryPicker SAF fallback:', err);
+      console.warn('showDirectoryPicker failed:', err);
     }
   }
 
-  // --- ВАРИАНТ 3: Android SAF Create Document Picker (showSaveFilePicker) ---
-  // Системный вызов Intent(Intent.ACTION_CREATE_DOCUMENT)
   if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
     try {
       const pickerOptions: SaveFilePickerOptions = {
-        suggestedName: configFileName,
+        suggestedName: defaultFileName,
         types: [
           {
             description: 'Конфигурация чертежного массива «Котлован» (*.json)',
@@ -412,81 +329,29 @@ export const chooseSaveLocationAndExport = async (
         ],
       };
 
-      const handle = await (window as unknown as {
-        showSaveFilePicker: (opts: unknown) => Promise<FileSystemFileHandle>;
-      }).showSaveFilePicker(pickerOptions);
-
-      if (handle.requestPermission) {
-        const perm = await (handle as unknown as {
-          requestPermission: (opts: { mode: string }) => Promise<string>;
-        }).requestPermission({ mode: 'readwrite' });
-        if (perm !== 'granted') {
-          return {
-            success: false,
-            fileName: '',
-            safMode: 'SAF_SINGLE_DOCUMENT',
-            error: 'Доступ к файлу не был подтвержден в SAF.',
-          };
-        }
-      }
-
+      const handle = await (window as unknown as { showSaveFilePicker: (opts: unknown) => Promise<FileSystemFileHandle> }).showSaveFilePicker(pickerOptions);
       activeFileHandle = handle;
+      const folderName = 'Папка устройства';
+      setAttachedStorageInfo(folderName, handle.name || defaultFileName);
+
       const jsonStr = serializeArrayConfig(array);
       const writable = await handle.createWritable();
       await writable.write(jsonStr);
       await writable.close();
 
-      setAttachedStorageInfo('SAF Хранилище', handle.name || configFileName);
       saveActiveArrayToStorage(array);
-
-      return {
-        success: true,
-        folderName: 'SAF Хранилище',
-        fileName: handle.name || configFileName,
-        safMode: 'SAF_SINGLE_DOCUMENT',
-      };
+      return { success: true, folderName, fileName: handle.name || defaultFileName };
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
-        return { success: false, fileName: '', safMode: 'SAF_SINGLE_DOCUMENT' };
+        return { success: false, folderName: '', fileName: '' };
       }
       console.warn('showSaveFilePicker fallback:', err);
     }
   }
 
-  // --- ВАРИАНТ 4: Web Share API или автоматическое скачивание в Download ---
-  try {
-    const jsonStr = serializeArrayConfig(array);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const file = new File([blob], configFileName, { type: 'application/json' });
-
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({
-        title: `Чертежный массив «${array.name}»`,
-        text: 'Конфигурация массива Котлован для Android',
-        files: [file],
-      });
-      setAttachedStorageInfo('Android Хранилище', configFileName);
-      saveActiveArrayToStorage(array);
-      return {
-        success: true,
-        folderName: 'Android Хранилище',
-        fileName: configFileName,
-        safMode: 'STANDARD_STORAGE',
-      };
-    }
-  } catch {
-    // Skip share error
-  }
-
-  // Фолбэк прямого сохранения
   exportArrayToJsonFile(array);
-  setAttachedStorageInfo('Папка «Загрузки»', configFileName);
-  return {
-    success: true,
-    folderName: 'Папка «Загрузки»',
-    fileName: configFileName,
-    safMode: 'STANDARD_STORAGE',
-  };
+  setAttachedStorageInfo('Папка «Загрузки»', defaultFileName);
+  return { success: true, folderName: 'Папка «Загрузки»', fileName: defaultFileName };
 };
 
 export const exportArrayToJsonFile = (array: BlueprintArray): void => {
@@ -504,39 +369,16 @@ export const exportArrayToJsonFile = (array: BlueprintArray): void => {
 };
 
 export const parseArrayConfigFile = async (file: File): Promise<BlueprintArray> => {
+  await ensureStorageAccess();
   const text = await file.text();
   const parsed = JSON.parse(text);
 
-  let loadedArray: BlueprintArray | null = null;
   if (parsed.array && parsed.array.rows && parsed.array.cols) {
-    loadedArray = parsed.array as BlueprintArray;
+    setAttachedStorageInfo('Загруженный файл', file.name);
+    return parsed.array as BlueprintArray;
   } else if (parsed.rows && parsed.cols && parsed.cells) {
-    loadedArray = parsed as BlueprintArray;
+    setAttachedStorageInfo('Загруженный файл', file.name);
+    return parsed as BlueprintArray;
   }
-
-  if (!loadedArray) {
-    throw new Error('Файл не содержит корректную конфигурацию массива «Котлован»');
-  }
-
-  // Приведение адресов ячеек из SAF пакета к рабочему типу CellData
-  const normalizedCells: { [key: string]: CellData } = {};
-  Object.entries(loadedArray.cells).forEach(([key, val]: [string, any]) => {
-    normalizedCells[key] = {
-      row: val.address?.row ?? val.row ?? 0,
-      col: val.address?.col ?? val.col ?? 0,
-      title: val.cellCardTitle || val.title || `Чертеж ${key}`,
-      imageFileName: val.imageFileName || 'plan.png',
-      imageDataUrl: val.imageDataUrl || '',
-      imageWidth: val.imageWidth || 1200,
-      imageHeight: val.imageHeight || 800,
-      customPosition: !!val.customPosition,
-      commonPoint: val.commonPoint,
-      viewport: val.viewport,
-      comments: val.comments || [],
-    };
-  });
-
-  loadedArray.cells = normalizedCells;
-  setAttachedStorageInfo('SAF Папка чертежей', file.name);
-  return loadedArray;
+  throw new StoragePermissionError(STORAGE_MESSAGES.ERR_INVALID_PATH, 'INVALID_CONFIG');
 };
